@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.0
+// @version      1.1
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc).
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -14,27 +14,31 @@
 
     const HANDLED_ATTR = 'data-collapsible-handled';
 
+    const diffFileHandlers = [
+        // File diff headers
+        {
+            selector: '.DiffFileHeader-module__diff-file-header__UuNN4',
+            getButton: (header) => {
+                const chevronButton = header.querySelector('button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right');
+                return chevronButton ? chevronButton.closest('button') : null;
+            }
+        },
+        // Inline comment thread headers
+        {
+            selector: '.InlineReviewThread-module__ReviewThreadContainer__iFcNZ',
+            getButton: (header) => {
+                return header.querySelector('button[data-is-first-collapse-button="true"]');
+            }
+        }
+    ];
+
     // Map of URL patterns to arrays of handlers
     // Each handler: { selector: string, getButton: function }
     const pageHandlers = new Map([
         // PR Files/Changes page
-        [/\/pull\/\d+\/(files|changes)/, [
-            // File diff headers
-            {
-                selector: '.DiffFileHeader-module__diff-file-header__UuNN4',
-                getButton: (header) => {
-                    const chevronButton = header.querySelector('button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right');
-                    return chevronButton ? chevronButton.closest('button') : null;
-                }
-            },
-            // Inline comment thread headers
-            {
-                selector: '.InlineReviewThread-module__ReviewThreadContainer__iFcNZ',
-                getButton: (header) => {
-                    return header.querySelector('button[data-is-first-collapse-button="true"]');
-                }
-            }
-        ]],
+        [/\/pull\/\d+\/(files|changes)/, diffFileHandlers],
+        // Commit page
+        [/\/commit\/[0-9a-f]+$/, diffFileHandlers],
         // PR Overview/Discussion page
         [/\/pull\/\d+\/?$/, [
             // Comment thread headers
