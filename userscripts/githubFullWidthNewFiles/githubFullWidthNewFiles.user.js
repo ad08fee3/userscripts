@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         githubFullWidthNewFiles
-// @version      1.0
-// @description  On PR/commit diffs, makes wholly-added or wholly-deleted files use the full portal width.
+// @version      1.1
+// @description  On PR/commit/compare diffs (new React UI and classic UI), makes wholly-added or wholly-deleted files use the full portal width.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFullWidthNewFiles/githubFullWidthNewFiles.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFullWidthNewFiles/githubFullWidthNewFiles.user.js
@@ -12,20 +12,29 @@
 (function () {
     'use strict';
 
+    // We mark each wholly one-sided diff table with this attribute (value
+    // "added" or "removed"), then a single static stylesheet does the widening.
+    // Both diff UIs share the attribute; the stylesheet's selectors are scoped so
+    // each rule family only bites the UI it was written for (see ensureStyle).
     const STYLE_ID = 'gh-full-width-new-files';
+    const TAG = 'data-gh-fw-onesided';
 
     // Only act on pages that actually carry a diff: a PR's Files changed/changes
-    // tab, or a single commit page.
+    // tab, a single commit page, or a branch/ref compare page (.../compare/...).
     function isDiffPage() {
         const path = window.location.pathname;
-        return /\/pull\/\d+\/(files|changes)/.test(path) || /\/commit\/[0-9a-f]+/.test(path);
+        return /\/pull\/\d+\/(files|changes)/.test(path) ||
+            /\/commit\/[0-9a-f]+/.test(path) ||
+            /\/compare\//.test(path);
     }
 
     // GitHub ships the diff metadata as a big JSON blob in the page. Each entry in
     // "diffSummaries" describes one file. Wholly-added files have
     // changeType === "ADDED" (no original side); wholly-deleted files have
-    // changeType === "REMOVED" (no new side). We collect both sets of paths so we
-    // know which diff tables to widen, and which side to collapse for each.
+    // changeType === "REMOVED" (no new side). We collect both sets of paths so the
+    // tagger knows which tables to widen, and which side to collapse for each.
+    // This is the only source that works for collapsed/large diffs whose rows
+    // haven't rendered yet, so it's preferred over scraping cells.
     function getOneSidedPaths() {
         const added = new Set();
         const removed = new Set();
@@ -84,63 +93,103 @@
         }
     }
 
-    // Each diff table is identified by aria-label="Diff for: <path>". Escape the
-    // bits that would break a double-quoted CSS attribute selector (backslashes
-    // and double quotes); real file paths basically never contain these, but it's
-    // cheap insurance.
-    function cssEscapeAttrValue(value) {
-        return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    // Inject the single stylesheet once. It carries two rule families, one per
+    // diff UI, distinguished entirely by selector so they never collide:
+    //
+    //   New React UI: the table has a 4-col <colgroup> with table-layout: fixed,
+    //   so shrinking the empty side's two <col>s lets the populated side expand
+    //   to fill the portal. Cols are 1 = original line number, 2 = original
+    //   content (left/base), 3 = new line number, 4 = new content (right/head).
+    //   ADDED files have no original side (squeeze 1+2); REMOVED files have no new
+    //   side (squeeze 3+4). Classic tables have no <colgroup>, so these never hit
+    //   them.
+    //
+    //   Classic / legacy UI (commit, compare, Enterprise): <table
+    //   class="...file-diff-split"> with table-layout: fixed and no <colgroup>, so
+    //   hiding the empty cells alone frees no space. We flip the table to
+    //   table-layout: auto, hide the empty side's cells, and give the populated
+    //   content column width: 100% to absorb the slack. Scoping to .file-diff-split
+    //   keeps the table-layout flip off the React tables. We hide the empty CELLS
+    //   (not whole nth-child columns) so hunk-expander rows are untouched; the
+    //   header <th> row is the table's first row, so tr:first-child > th never
+    //   matches a code/expander row.
+    function ensureStyle() {
+        if (document.getElementById(STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = [
+            // React colgroup squeeze.
+            `table[${TAG}="added"] > colgroup > col:nth-child(1),`,
+            `table[${TAG}="added"] > colgroup > col:nth-child(2) { width: 1px !important; }`,
+            `table[${TAG}="removed"] > colgroup > col:nth-child(3),`,
+            `table[${TAG}="removed"] > colgroup > col:nth-child(4) { width: 1px !important; }`,
+            // Classic cell-hide.
+            `table[${TAG}].file-diff-split { table-layout: auto !important; }`,
+            `table[${TAG}].file-diff-split td.blob-num-empty,`,
+            `table[${TAG}].file-diff-split td.blob-code-empty { display: none !important; }`,
+            `table[${TAG}="added"].file-diff-split tr:first-child > th:nth-child(1),`,
+            `table[${TAG}="added"].file-diff-split tr:first-child > th:nth-child(2) { display: none !important; }`,
+            `table[${TAG}="removed"].file-diff-split tr:first-child > th:nth-child(3),`,
+            `table[${TAG}="removed"].file-diff-split tr:first-child > th:nth-child(4) { display: none !important; }`,
+            `table[${TAG}="added"].file-diff-split td.blob-code-addition { width: 100% !important; }`,
+            `table[${TAG}="removed"].file-diff-split td.blob-code-deletion { width: 100% !important; }`,
+        ].join('\n');
+        (document.head || document.documentElement).appendChild(style);
     }
 
-    // Build (or rebuild) a single <style> element that, for each one-sided file's
-    // table, collapses the empty side's two columns to a sliver. With
-    // table-layout: fixed, shrinking those <col>s lets the populated side expand
-    // to fill the portal width. The four <col>s are, in order:
-    //   1 = original line number, 2 = original content (left / base side),
-    //   3 = new line number,      4 = new content      (right / head side).
-    // ADDED files have no original side, so we squeeze cols 1+2. REMOVED files
-    // have no new side, so we squeeze cols 3+4.
-    function applyStyles({ added, removed }) {
-        let style = document.getElementById(STYLE_ID);
-        if (!style) {
-            style = document.createElement('style');
-            style.id = STYLE_ID;
-            document.head.appendChild(style);
-        }
-
-        if (added.size === 0 && removed.size === 0) {
-            style.textContent = '';
-            return;
-        }
-
-        const rules = [];
-        const collapse = (path, cols) => {
-            const sel = `table[aria-label="Diff for: ${cssEscapeAttrValue(path)}"]`;
-            for (const n of cols) {
-                rules.push(`${sel} > colgroup > col:nth-child(${n}) { width: 1px !important; }`);
+    // Mark each one-sided diff table with the TAG attribute. Idempotent: re-tagging
+    // an already-correct table is a no-op, and a table that gains context lines
+    // later (lazy "expand" clicks) gets untagged.
+    function tagTables({ added, removed }) {
+        // New React tables (colgroup-based). Prefer the JSON-derived side, which
+        // works even before rows render; fall back to scraping the rendered cells
+        // for surfaces (e.g. the commit page) whose metadata ships as
+        // "diffEntryData" rather than "diffSummaries", so the JSON walk found
+        // nothing. Each text cell is tagged left-side-diff-cell or
+        // right-side-diff-cell, and the blank side's cells carry empty-diff-line.
+        for (const table of document.querySelectorAll('table[aria-label^="Diff for: "]')) {
+            const path = table.getAttribute('aria-label').replace(/^Diff for: /, '');
+            let side = added.has(path) ? 'added' : removed.has(path) ? 'removed' : null;
+            if (!side) {
+                const hasLeft = !!table.querySelector('td.left-side-diff-cell:not(.empty-diff-line)');
+                const hasRight = !!table.querySelector('td.right-side-diff-cell:not(.empty-diff-line)');
+                if (hasRight && !hasLeft) side = 'added';
+                else if (hasLeft && !hasRight) side = 'removed';
             }
-        };
-        for (const path of added) collapse(path, [1, 2]);
-        for (const path of removed) collapse(path, [3, 4]);
-        style.textContent = rules.join('\n');
+            setTag(table, side);
+        }
+
+        // Classic split diff tables. No <colgroup> and no diffSummaries JSON, so
+        // detect one-sidedness structurally: a wholly-added or wholly-deleted file
+        // has NO context lines (nothing on the opposite side to show), so it's
+        // one-sided iff it has additions xor deletions and no context.
+        for (const table of document.querySelectorAll('table.js-diff-table.file-diff-split')) {
+            const hasAddition = !!table.querySelector('.blob-code-addition');
+            const hasDeletion = !!table.querySelector('.blob-code-deletion');
+            const hasContext = !!table.querySelector('.blob-code-context');
+            const oneSided = !hasContext && (hasAddition !== hasDeletion);
+            setTag(table, oneSided ? (hasAddition ? 'added' : 'removed') : null);
+        }
+    }
+
+    function setTag(table, side) {
+        if (side) table.setAttribute(TAG, side);
+        else table.removeAttribute(TAG);
     }
 
     function run() {
-        if (!isDiffPage()) {
-            // Clear any rules we left behind after navigating away from a diff.
-            const style = document.getElementById(STYLE_ID);
-            if (style) style.textContent = '';
-            return;
-        }
-        applyStyles(getOneSidedPaths());
+        // Off a diff page there's nothing to do: the stylesheet's rules are inert
+        // without tagged tables, and tagged tables only exist on diff pages.
+        if (!isDiffPage()) return;
+        ensureStyle();
+        tagTables(getOneSidedPaths());
     }
 
     run();
 
     // The diff payload and tables can show up after the initial load (lazy
-    // rendering, Turbo navigations), so re-run when the DOM changes. Our CSS is
-    // keyed off aria-label, so it "just works" for tables that appear later; the
-    // re-run is really about catching the JSON once it's present.
+    // rendering, Turbo navigations), so re-run when the DOM changes to catch the
+    // JSON and tables once they're present.
     const observer = new MutationObserver(run);
     if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });

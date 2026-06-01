@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.1
+// @version      1.2
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc).
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -15,13 +15,21 @@
     const HANDLED_ATTR = 'data-collapsible-handled';
 
     const diffFileHandlers = [
-        // File diff headers
+        // File diff headers (new React diff UI; class carries a build hash)
         {
-            selector: '.DiffFileHeader-module__diff-file-header__UuNN4',
+            selector: '[class*="DiffFileHeader-module__diff-file-header__"]',
             getButton: (header) => {
                 const chevronButton = header.querySelector('button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right');
                 return chevronButton ? chevronButton.closest('button') : null;
             }
+        },
+        // File diff headers (classic/legacy diff UI, still served on commit and
+        // compare pages, especially on GitHub Enterprise). The whole bar is
+        // .file-header / .js-file-header; the collapse toggle is the
+        // "Toggle diff contents" chevron button (button.js-details-target).
+        {
+            selector: '.js-file-header',
+            getButton: (header) => header.querySelector('button.js-details-target')
         },
         // Inline comment thread headers
         {
@@ -39,6 +47,8 @@
         [/\/pull\/\d+\/(files|changes)/, diffFileHandlers],
         // Commit page
         [/\/commit\/[0-9a-f]+$/, diffFileHandlers],
+        // Branch/ref compare page (.../compare/main...feature)
+        [/\/compare\//, diffFileHandlers],
         // PR Overview/Discussion page
         [/\/pull\/\d+\/?$/, [
             // Comment thread headers
