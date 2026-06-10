@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.2
-// @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc).
+// @version      1.3
+// @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -14,7 +14,9 @@
 
     const HANDLED_ATTR = 'data-collapsible-handled';
 
-    const diffFileHandlers = [
+    // Diff file header handlers - split out so we can apply deferToRefinedGithub when
+    // needed (Refined Github already handles click-to-collapse on the PR files page).
+    const diffFileHeaderSelectors = [
         // File diff headers (new React diff UI; class carries a build hash)
         {
             selector: '[class*="DiffFileHeader-module__diff-file-header__"]',
@@ -31,20 +33,31 @@
             selector: '.js-file-header',
             getButton: (header) => header.querySelector('button.js-details-target')
         },
+    ];
+
+    const inlineCommentHandler = {
         // Inline comment thread headers
-        {
-            selector: '.InlineReviewThread-module__ReviewThreadContainer__iFcNZ',
-            getButton: (header) => {
-                return header.querySelector('button[data-is-first-collapse-button="true"]');
-            }
+        selector: '.InlineReviewThread-module__ReviewThreadContainer__iFcNZ',
+        getButton: (header) => {
+            return header.querySelector('button[data-is-first-collapse-button="true"]');
         }
+    };
+
+    const diffFileHandlers = [
+        ...diffFileHeaderSelectors,
+        inlineCommentHandler,
     ];
 
     // Map of URL patterns to arrays of handlers
-    // Each handler: { selector: string, getButton: function }
+    // Each handler: { selector: string, getButton: function, deferToRefinedGithub?: boolean }
+    // deferToRefinedGithub: skip the click handler if refined-github attr is present at click time
     const pageHandlers = new Map([
-        // PR Files/Changes page
-        [/\/pull\/\d+\/(files|changes)/, diffFileHandlers],
+        // PR Files/Changes page - Refined Github handles collapse clicks on file headers when
+        // installed, so those are deferred to it. Inline comment threads always get full handling.
+        [/\/pull\/\d+\/(files|changes)/, [
+            ...diffFileHeaderSelectors.map(h => ({ ...h, deferToRefinedGithub: true })),
+            inlineCommentHandler,
+        ]],
         // Commit page
         [/\/commit\/[0-9a-f]+$/, diffFileHandlers],
         // Branch/ref compare page (.../compare/main...feature)
@@ -61,7 +74,7 @@
         ]]
     ]);
 
-    function makeHeaderCollapsible(header, getButton) {
+    function makeHeaderCollapsible(header, getButton, deferToRefinedGithub) {
         if (header.hasAttribute(HANDLED_ATTR)) return;
         header.setAttribute(HANDLED_ATTR, '1');
 
@@ -73,6 +86,8 @@
 
         // Click handler for the entire header
         header.addEventListener('click', (e) => {
+            // If Refined Github is present and this handler defers to it, let RG handle it
+            if (deferToRefinedGithub && document.documentElement.hasAttribute('refined-github')) return;
             // Don't trigger if clicking on interactive elements
             const target = e.target;
             if (target.closest('button') || target.closest('a') || target.closest('input')) {
@@ -92,7 +107,7 @@
             if (urlPattern.test(currentPath)) {
                 for (const handler of handlers) {
                     const headers = document.querySelectorAll(handler.selector);
-                    headers.forEach(header => makeHeaderCollapsible(header, handler.getButton));
+                    headers.forEach(header => makeHeaderCollapsible(header, handler.getButton, handler.deferToRefinedGithub));
                 }
             }
         }
