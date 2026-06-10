@@ -1,11 +1,18 @@
-# userscripts
+# Userscripts
 
 Handy userscripts that I want to keep track of. They generally fix tiny quality-of-life issues or annoyances.
 
+Eventually this will include scripts I pull in from other places that I want to back up or keep version-controlled, but for now these are all homemade.
+
 ## Scripts
 
-- **githubAutoSso** _([Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubAutoSso/githubAutoSso.user.js))_ - Automatically opens the GitHub SSO banner link in a background tab, then closes it after auth completes. This works best when used in conjunction with [this browser extension](https://chromewebstore.google.com/detail/github-sso-auto-auth/gdegknehnfdbnfjljblhleiheokebdla).
-- **githubCollapsibleHeaderBars** _([Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js))_ - Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc) so you don't have to only click the tiny collapse-button.
-- **githubDiffWhitespace** _([Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubDiffWhitespace/githubDiffWhitespace.user.js))_ - Enables "Hide whitespace changes" in GitHubPRs by default. Still lets you un-toggle that setting if you prefer.
-- **githubFullWidthNewFiles** _([Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFullWidthNewFiles/githubFullWidthNewFiles.user.js))_ - On PR and commit diffs, makes brand-new (added) files use the full portal width in side-by-side view by collapsing the empty original-side columns, so a file with no deletions no longer wastes half the screen.
-- **githubWideInlineComments** _([Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubWideInlineComments/githubWideInlineComments.user.js))_ - Widens inline PR review comments so comment threads in the diff use more of the available space.
+| Script | Description |
+| --- | --- |
+| [githubAutoSso](userscripts/githubAutoSso/README.md) | Automatically completes GitHub's SSO re-auth banner in a background tab and closes it when done. |
+| [githubCollapsibleHeaderBars](userscripts/githubCollapsibleHeaderBars/README.md) | Allows you to click anywhere on a file header to collapse its content. Expands upon the functionality added by Refined GitHub. |
+| [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Hides whitespace changes in GitHub diffs by default, while still letting you opt back in. |
+| [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
+
+## Deprecated
+
+This repo still contains some older scripts that have been superseded by other scripts/extensions. See the [Deprecated README](userscripts/deprecated/README.md) for the full list.
