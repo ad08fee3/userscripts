@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.3
+// @version      1.4
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -15,7 +15,7 @@
     const HANDLED_ATTR = 'data-collapsible-handled';
 
     // Diff file header handlers - split out so we can apply deferToRefinedGithub when
-    // needed (Refined Github already handles click-to-collapse on the PR files page).
+    // needed (Refined Github already handles click-to-collapse on a few pages).
     const diffFileHeaderSelectors = [
         // File diff headers (new React diff UI; class carries a build hash)
         {
@@ -43,8 +43,11 @@
         }
     };
 
-    const diffFileHandlers = [
-        ...diffFileHeaderSelectors,
+    // Diff file headers deferred to Refined Github when it's installed, with inline
+    // comment threads always fully handled. Shared by the PR Files, commit, and
+    // compare pages since Refined Github handles click-to-collapse on all of them.
+    const deferredDiffFileHandlers = [
+        ...diffFileHeaderSelectors.map(h => ({ ...h, deferToRefinedGithub: true })),
         inlineCommentHandler,
     ];
 
@@ -54,14 +57,11 @@
     const pageHandlers = new Map([
         // PR Files/Changes page - Refined Github handles collapse clicks on file headers when
         // installed, so those are deferred to it. Inline comment threads always get full handling.
-        [/\/pull\/\d+\/(files|changes)/, [
-            ...diffFileHeaderSelectors.map(h => ({ ...h, deferToRefinedGithub: true })),
-            inlineCommentHandler,
-        ]],
-        // Commit page
-        [/\/commit\/[0-9a-f]+$/, diffFileHandlers],
-        // Branch/ref compare page (.../compare/main...feature)
-        [/\/compare\//, diffFileHandlers],
+        [/\/pull\/\d+\/(files|changes)/, deferredDiffFileHandlers],
+        // Commit page - Refined Github also handles collapse clicks here, so defer.
+        [/\/commit\/[0-9a-f]+$/, deferredDiffFileHandlers],
+        // Branch/ref compare page (.../compare/main...feature) - same deferral.
+        [/\/compare\//, deferredDiffFileHandlers],
         // PR Overview/Discussion page
         [/\/pull\/\d+\/?$/, [
             // Comment thread headers
