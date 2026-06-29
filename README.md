@@ -9,6 +9,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | Script | Description |
 | --- | --- |
 | [githubAutoSso](userscripts/githubAutoSso/README.md) | Automatically completes GitHub's SSO re-auth banner in a background tab and closes it when done. |
+| [githubFileTreeColors](userscripts/githubFileTreeColors/README.md) | Colors the PR sidebar file tree to reflect each file's collapsed and viewed state at a glance. |
 | [githubCollapsibleHeaderBars](userscripts/githubCollapsibleHeaderBars/README.md) | Allows you to click anywhere on a file header to collapse its content. Expands upon the functionality added by Refined GitHub. |
 | [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Hides whitespace changes in GitHub diffs by default, while still letting you opt back in. |
 | [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
