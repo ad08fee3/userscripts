@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.0
+// @version      1.1
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -133,6 +133,100 @@
         syncStyles();
     }
 
+    // Covers the diff content area with a spinner while forceRenderAllDiffs scrolls
+    // the page around, so the user sees a loading state instead of the page jumping.
+    // The overlay is `position: fixed` (viewport-relative, not document-relative) so
+    // it stays put over the visible window while the page underneath grows and
+    // scrolls, and it's a flex container so the spinner centers itself. GitHub keeps
+    // mutating the diff list (syntax highlighting, height recalculation, etc.) for a
+    // bit after our own scroll loop finishes, so hiding is debounced until DOM
+    // activity in the diff list actually goes quiet — but capped by OVERLAY_MAX_MS so
+    // a page that never settles can't leave the overlay stuck up forever.
+    const OVERLAY_ID = 'gh-file-tree-colors-loading-overlay';
+    const SPINNER_STYLE_ID = 'gh-file-tree-colors-spinner-style';
+    const OVERLAY_QUIET_MS = 700;
+    const OVERLAY_MAX_MS = 8000;
+
+    let overlayEl = null;
+    let hideOverlayTimer = null;
+    let overlayDeadline = 0;
+
+    // Aligns the overlay with the content column. Called at show time and on resize,
+    // so the overlay keeps tracking the column if the window or sidebar width changes
+    // while diffs load.
+    function positionOverlay() {
+        if (!overlayEl) return;
+        const container = document.querySelector('[data-component="PageLayout.Content"]');
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        overlayEl.style.left = `${rect.left}px`;
+        overlayEl.style.width = `${rect.width}px`;
+    }
+
+    function showLoadingOverlay() {
+        if (overlayEl) return;
+
+        const container = document.querySelector('[data-component="PageLayout.Content"]');
+        if (!container) return;
+
+        if (!document.getElementById(SPINNER_STYLE_ID)) {
+            const style = document.createElement('style');
+            style.id = SPINNER_STYLE_ID;
+            style.textContent = '@keyframes gh-file-tree-colors-spin { to { transform: rotate(360deg); } }';
+            document.head.appendChild(style);
+        }
+
+        const dark = document.documentElement.getAttribute('data-color-mode') === 'dark';
+
+        const overlay = document.createElement('div');
+        overlay.id = OVERLAY_ID;
+        overlay.style.cssText = `
+            position: fixed; z-index: 100;
+            top: 0; height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            background: ${dark ? 'rgba(13,17,23,0.75)' : 'rgba(255,255,255,0.75)'};
+        `;
+
+        const ring = document.createElement('div');
+        ring.style.cssText = `
+            width: 48px; height: 48px; border-radius: 50%;
+            border: 5px solid rgba(128,128,128,0.3);
+            border-top-color: ${dark ? '#2f81f7' : '#0969da'};
+            animation: gh-file-tree-colors-spin 0.8s linear infinite;
+        `;
+        overlay.appendChild(ring);
+
+        document.body.appendChild(overlay);
+        overlayEl = overlay;
+        overlayDeadline = performance.now() + OVERLAY_MAX_MS;
+        positionOverlay();
+        window.addEventListener('resize', positionOverlay);
+    }
+
+    function hideLoadingOverlay() {
+        clearTimeout(hideOverlayTimer);
+        hideOverlayTimer = null;
+        window.removeEventListener('resize', positionOverlay);
+        overlayEl?.remove();
+        overlayEl = null;
+    }
+
+    // Postpones hideLoadingOverlay: called once when our own scroll loop finishes,
+    // and again on every relevant mutation seen while the overlay is up, so it only
+    // actually hides once the diff list has been quiet for OVERLAY_QUIET_MS. The
+    // OVERLAY_MAX_MS deadline is a hard ceiling so a page that keeps mutating can't
+    // keep re-arming the debounce indefinitely.
+    function requestHideOverlay() {
+        if (!overlayEl) return;
+        clearTimeout(hideOverlayTimer);
+        const remaining = overlayDeadline - performance.now();
+        if (remaining <= 0) {
+            hideLoadingOverlay();
+            return;
+        }
+        hideOverlayTimer = setTimeout(hideLoadingOverlay, Math.min(OVERLAY_QUIET_MS, remaining));
+    }
+
     // GitHub lazy-loads diff content via IntersectionObserver — diffs outside the viewport
     // are never inserted into the DOM until they scroll into view. This scrolls to the bottom
     // in steps (two frames each to let GitHub's observers fire), then restores position.
@@ -176,7 +270,11 @@
             }
             return false;
         });
-        if (!relevant || scheduled) return;
+        if (!relevant) {
+            return;
+        }
+        requestHideOverlay();
+        if (scheduled) return;
         scheduled = true;
         requestAnimationFrame(() => {
             scheduled = false;
@@ -184,7 +282,22 @@
         });
     }
 
-    forceRenderAllDiffs(sync);
+    // forceRenderAllDiffs scrolls the whole page to force-load lazy diffs, which is
+    // only meaningful (and not disruptive) on the PR diff view itself, e.g.
+    // https://github.com/owner/repo/pull/123/files or .../pull/123/changes
+    function isPRDiffPage() {
+        return /^\/[^/]+\/[^/]+\/pull\/\d+\/(files|changes)(\/|$)/.test(window.location.pathname);
+    }
+
+    if (isPRDiffPage()) {
+        showLoadingOverlay();
+        forceRenderAllDiffs(() => {
+            sync();
+            requestHideOverlay();
+        });
+    } else {
+        sync();
+    }
 
     const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
