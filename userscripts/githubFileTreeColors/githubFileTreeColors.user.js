@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.1
+// @version      1.2
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -20,6 +20,9 @@
         folderLabel: ':scope > div [class*="PRIVATE_TreeView-item-content-text"] > span',
         diffHeader: '[class*="DiffFileHeader-module__diff-file-header__"]',
         folderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg',
+        // Sticky toolbar above the diff list; the loading overlay starts below it so
+        // the toolbar stays visible while diffs load.
+        diffToolbar: '[class*="DiffComparisonViewer-module__toolbarWrapper__"] > section',
     };
     const CLASS = {
         collapsed: 'DiffFileHeader-module__collapsed__',
@@ -159,8 +162,17 @@
         const container = document.querySelector('[data-component="PageLayout.Content"]');
         if (!container) return;
         const rect = container.getBoundingClientRect();
+        // Clamp to the visible viewport so the fixed overlay covers only the part of
+        // the content column that's actually on screen, not the header above it. Also
+        // start below the sticky diff toolbar (when present) so it stays uncovered.
+        const toolbar = document.querySelector(SEL.diffToolbar);
+        const toolbarBottom = toolbar ? toolbar.getBoundingClientRect().bottom : 0;
+        const top = Math.max(rect.top, toolbarBottom, 0);
+        const bottom = Math.min(rect.bottom, window.innerHeight);
         overlayEl.style.left = `${rect.left}px`;
         overlayEl.style.width = `${rect.width}px`;
+        overlayEl.style.top = `${top}px`;
+        overlayEl.style.height = `${Math.max(bottom - top, 0)}px`;
     }
 
     function showLoadingOverlay() {
@@ -182,7 +194,6 @@
         overlay.id = OVERLAY_ID;
         overlay.style.cssText = `
             position: fixed; z-index: 100;
-            top: 0; height: 100vh;
             display: flex; align-items: center; justify-content: center;
             background: ${dark ? 'rgba(13,17,23,0.75)' : 'rgba(255,255,255,0.75)'};
         `;
@@ -201,12 +212,14 @@
         overlayDeadline = performance.now() + OVERLAY_MAX_MS;
         positionOverlay();
         window.addEventListener('resize', positionOverlay);
+        window.addEventListener('scroll', positionOverlay, { passive: true });
     }
 
     function hideLoadingOverlay() {
         clearTimeout(hideOverlayTimer);
         hideOverlayTimer = null;
         window.removeEventListener('resize', positionOverlay);
+        window.removeEventListener('scroll', positionOverlay);
         overlayEl?.remove();
         overlayEl = null;
     }
