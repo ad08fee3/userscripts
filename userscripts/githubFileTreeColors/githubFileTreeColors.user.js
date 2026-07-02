@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.2
+// @version      1.3
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -20,9 +20,7 @@
         folderLabel: ':scope > div [class*="PRIVATE_TreeView-item-content-text"] > span',
         diffHeader: '[class*="DiffFileHeader-module__diff-file-header__"]',
         folderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg',
-        // Sticky toolbar above the diff list; the loading overlay starts below it so
-        // the toolbar stays visible while diffs load.
-        diffToolbar: '[class*="DiffComparisonViewer-module__toolbarWrapper__"] > section',
+        viewedButton: '[class*="MarkAsViewedButton-module__"]',
     };
     const CLASS = {
         collapsed: 'DiffFileHeader-module__collapsed__',
@@ -61,13 +59,56 @@
         el.style.setProperty('text-decoration-color', viewed ? colors.strikethrough : '', viewed ? 'important' : '');
     }
 
+    // GitHub embeds the PR's diff summary (including a markedAsViewed flag per file)
+    // as JSON data islands in the page on load. On a fresh load GitHub only
+    // auto-collapses diffs that are already marked viewed, so viewed and collapsed
+    // start in lockstep — reading this lets us seed accurate initial state without
+    // forcing every lazy diff to render just to inspect its DOM.
+    function getEmbeddedFileStates() {
+        const states = new Map();
+        for (const script of document.querySelectorAll('script[type="application/json"]')) {
+            let data;
+            try {
+                data = JSON.parse(script.textContent);
+            } catch {
+                continue;
+            }
+            collectFileStates(data, states);
+        }
+        return states;
+    }
+
+    // Recursively walk a parsed JSON value looking for "diffSummaries" arrays,
+    // since the payload key that holds them varies by page (PR files/changes tab,
+    // commit page, etc). We don't assume where in the tree it lives.
+    function collectFileStates(value, states) {
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                collectFileStates(item, states);
+            }
+            return;
+        }
+        if (value && typeof value === 'object') {
+            if (Array.isArray(value.diffSummaries)) {
+                for (const summary of value.diffSummaries) {
+                    if (!summary?.pathDigest) continue;
+                    states.set(`diff-${summary.pathDigest}`, { collapsed: !!summary.markedAsViewed, viewed: !!summary.markedAsViewed });
+                }
+            }
+            for (const key of Object.keys(value)) {
+                collectFileStates(value[key], states);
+            }
+        }
+    }
+
     function buildRegistry() {
         files.clear();
         dirs.clear();
 
+        const embeddedStates = getEmbeddedFileStates();
         document.querySelectorAll(`#pr-file-tree ${SEL.fileLink}`).forEach(link => {
             const hash = link.getAttribute('href').slice(1);
-            files.set(hash, { collapsed: false, viewed: false });
+            files.set(hash, embeddedStates.get(hash) ?? { collapsed: false, viewed: false });
         });
 
         document.querySelectorAll('#pr-file-tree li[role="treeitem"][aria-expanded]').forEach(folder => {
@@ -99,8 +140,17 @@
             const header = diffRegion.querySelector(SEL.diffHeader);
             if (!header) continue;
 
+            // GitHub virtualizes the diff list: far-off-screen diffs render a
+            // lightweight header (file name + collapse toggle) without the
+            // mark-as-viewed button until they scroll near the viewport. Until
+            // that button mounts, the DOM can't tell us whether the file is
+            // viewed, so keep whatever state we already have (seeded from the
+            // embedded JSON) rather than clobbering it with a false negative.
+            const viewedButton = header.querySelector(SEL.viewedButton);
+            if (!viewedButton) continue;
+
             file.collapsed = header.className.split(' ').some(c => c.includes(CLASS.collapsed));
-            file.viewed = !!header.querySelector(`[class*="${CLASS.viewed}"]`);
+            file.viewed = viewedButton.className.split(' ').some(c => c.includes(CLASS.viewed));
         }
     }
 
@@ -136,137 +186,6 @@
         syncStyles();
     }
 
-    // Covers the diff content area with a spinner while forceRenderAllDiffs scrolls
-    // the page around, so the user sees a loading state instead of the page jumping.
-    // The overlay is `position: fixed` (viewport-relative, not document-relative) so
-    // it stays put over the visible window while the page underneath grows and
-    // scrolls, and it's a flex container so the spinner centers itself. GitHub keeps
-    // mutating the diff list (syntax highlighting, height recalculation, etc.) for a
-    // bit after our own scroll loop finishes, so hiding is debounced until DOM
-    // activity in the diff list actually goes quiet — but capped by OVERLAY_MAX_MS so
-    // a page that never settles can't leave the overlay stuck up forever.
-    const OVERLAY_ID = 'gh-file-tree-colors-loading-overlay';
-    const SPINNER_STYLE_ID = 'gh-file-tree-colors-spinner-style';
-    const OVERLAY_QUIET_MS = 700;
-    const OVERLAY_MAX_MS = 8000;
-
-    let overlayEl = null;
-    let hideOverlayTimer = null;
-    let overlayDeadline = 0;
-
-    // Aligns the overlay with the content column. Called at show time and on resize,
-    // so the overlay keeps tracking the column if the window or sidebar width changes
-    // while diffs load.
-    function positionOverlay() {
-        if (!overlayEl) return;
-        const container = document.querySelector('[data-component="PageLayout.Content"]');
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        // Clamp to the visible viewport so the fixed overlay covers only the part of
-        // the content column that's actually on screen, not the header above it. Also
-        // start below the sticky diff toolbar (when present) so it stays uncovered.
-        const toolbar = document.querySelector(SEL.diffToolbar);
-        const toolbarBottom = toolbar ? toolbar.getBoundingClientRect().bottom : 0;
-        const top = Math.max(rect.top, toolbarBottom, 0);
-        const bottom = Math.min(rect.bottom, window.innerHeight);
-        overlayEl.style.left = `${rect.left}px`;
-        overlayEl.style.width = `${rect.width}px`;
-        overlayEl.style.top = `${top}px`;
-        overlayEl.style.height = `${Math.max(bottom - top, 0)}px`;
-    }
-
-    function showLoadingOverlay() {
-        if (overlayEl) return;
-
-        const container = document.querySelector('[data-component="PageLayout.Content"]');
-        if (!container) return;
-
-        if (!document.getElementById(SPINNER_STYLE_ID)) {
-            const style = document.createElement('style');
-            style.id = SPINNER_STYLE_ID;
-            style.textContent = '@keyframes gh-file-tree-colors-spin { to { transform: rotate(360deg); } }';
-            document.head.appendChild(style);
-        }
-
-        const dark = document.documentElement.getAttribute('data-color-mode') === 'dark';
-
-        const overlay = document.createElement('div');
-        overlay.id = OVERLAY_ID;
-        overlay.style.cssText = `
-            position: fixed; z-index: 100;
-            display: flex; align-items: center; justify-content: center;
-            background: ${dark ? 'rgba(13,17,23,0.75)' : 'rgba(255,255,255,0.75)'};
-        `;
-
-        const ring = document.createElement('div');
-        ring.style.cssText = `
-            width: 48px; height: 48px; border-radius: 50%;
-            border: 5px solid rgba(128,128,128,0.3);
-            border-top-color: ${dark ? '#2f81f7' : '#0969da'};
-            animation: gh-file-tree-colors-spin 0.8s linear infinite;
-        `;
-        overlay.appendChild(ring);
-
-        document.body.appendChild(overlay);
-        overlayEl = overlay;
-        overlayDeadline = performance.now() + OVERLAY_MAX_MS;
-        positionOverlay();
-        window.addEventListener('resize', positionOverlay);
-        window.addEventListener('scroll', positionOverlay, { passive: true });
-    }
-
-    function hideLoadingOverlay() {
-        clearTimeout(hideOverlayTimer);
-        hideOverlayTimer = null;
-        window.removeEventListener('resize', positionOverlay);
-        window.removeEventListener('scroll', positionOverlay);
-        overlayEl?.remove();
-        overlayEl = null;
-    }
-
-    // Postpones hideLoadingOverlay: called once when our own scroll loop finishes,
-    // and again on every relevant mutation seen while the overlay is up, so it only
-    // actually hides once the diff list has been quiet for OVERLAY_QUIET_MS. The
-    // OVERLAY_MAX_MS deadline is a hard ceiling so a page that keeps mutating can't
-    // keep re-arming the debounce indefinitely.
-    function requestHideOverlay() {
-        if (!overlayEl) return;
-        clearTimeout(hideOverlayTimer);
-        const remaining = overlayDeadline - performance.now();
-        if (remaining <= 0) {
-            hideLoadingOverlay();
-            return;
-        }
-        hideOverlayTimer = setTimeout(hideLoadingOverlay, Math.min(OVERLAY_QUIET_MS, remaining));
-    }
-
-    // GitHub lazy-loads diff content via IntersectionObserver — diffs outside the viewport
-    // are never inserted into the DOM until they scroll into view. This scrolls to the bottom
-    // in steps (two frames each to let GitHub's observers fire), then restores position.
-    // The CSS override handles content-visibility: auto in case GitHub uses that too.
-    function forceRenderAllDiffs(onDone) {
-        const style = document.createElement('style');
-        style.textContent = '[data-testid="progressive-diffs-list"] > * { content-visibility: visible !important; }';
-        document.head.appendChild(style);
-
-        const scrollEl = document.scrollingElement || document.documentElement;
-        const savedTop = scrollEl.scrollTop;
-
-        function step() {
-            const atBottom = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 1;
-            if (atBottom) {
-                scrollEl.scrollTop = savedTop;
-                requestAnimationFrame(onDone);
-                return;
-            }
-            scrollEl.scrollTop += window.innerHeight;
-            // Two frames: one for layout, one for GitHub's IntersectionObserver callbacks
-            requestAnimationFrame(() => requestAnimationFrame(step));
-        }
-
-        requestAnimationFrame(step);
-    }
-
     // Coalesce the bursts of mutations React fires per interaction into one sync
     // per animation frame, so a large PR runs a single DOM sweep instead of dozens.
     let scheduled = false;
@@ -286,7 +205,6 @@
         if (!relevant) {
             return;
         }
-        requestHideOverlay();
         if (scheduled) return;
         scheduled = true;
         requestAnimationFrame(() => {
@@ -295,22 +213,7 @@
         });
     }
 
-    // forceRenderAllDiffs scrolls the whole page to force-load lazy diffs, which is
-    // only meaningful (and not disruptive) on the PR diff view itself, e.g.
-    // https://github.com/owner/repo/pull/123/files or .../pull/123/changes
-    function isPRDiffPage() {
-        return /^\/[^/]+\/[^/]+\/pull\/\d+\/(files|changes)(\/|$)/.test(window.location.pathname);
-    }
-
-    if (isPRDiffPage()) {
-        showLoadingOverlay();
-        forceRenderAllDiffs(() => {
-            sync();
-            requestHideOverlay();
-        });
-    } else {
-        sync();
-    }
+    sync();
 
     const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
