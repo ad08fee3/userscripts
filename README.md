@@ -13,6 +13,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [githubCollapsibleHeaderBars](userscripts/githubCollapsibleHeaderBars/README.md) | Allows you to click anywhere on a file header to collapse its content. Expands upon the functionality added by Refined GitHub. |
 | [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Hides whitespace changes in GitHub diffs by default, while still letting you opt back in. |
 | [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
+| [instagramFixer](userscripts/instagramFixer/README.md) | Closes the stupid "pLeAsE lOg iN" modal and unmutes Instagram reels automatically. |
 
 ## Deprecated
 
