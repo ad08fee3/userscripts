@@ -20,6 +20,8 @@ Adds a "Collapse Junk" button next to "Submit comments" that toggles all detecte
 
 It also updates the "changed lines" counts at the top of the page to no longer count junk files towards a PR's size, with a hover/focus tooltip on that count showing the original, pre-exclusion totals. Note that this only updates once you view the Changes page on the PR.
 
+Works great in conjunction with the [File Tree Colors](https://github.com/ad08fee3/userscripts/tree/main/userscripts/githubFileTreeColors) script.
+
 ## To-do / Features to add
 
 These will involve creating settings that the user can configure.
