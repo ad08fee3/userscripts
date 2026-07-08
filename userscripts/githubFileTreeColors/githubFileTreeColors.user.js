@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.3
+// @version      1.4
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -40,7 +40,26 @@
     // No DOM refs stored — folder and label elements are looked up live at render time.
     const dirs = new Map();
 
-    let registryPath = '';
+    // owner/repo#number for the PR the current pathname points at, or null off
+    // a PR page. Tab switches within the same PR (changes <-> overview <->
+    // commits) each have a distinct pathname but share a slug - wiping on
+    // every pathname change would throw away the registry on every tab
+    // switch, re-triggering the exact partial-mount race mergeRegistry exists
+    // to avoid, and losing any styling state (like a collapsed file) that was
+    // never going to reappear in a fresh embedded-JSON snapshot anyway.
+    function getPrSlug() {
+        const match = window.location.pathname.match(/^\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+        return match ? `${match[1]}#${match[2]}` : null;
+    }
+
+    let currentPrSlug = null;
+
+    // getEmbeddedFileStates() parses every JSON script tag on the page - cheap
+    // once, wasteful if repeated on every mergeRegistry() pass (mergeRegistry
+    // runs on every sync(), which can fire many times per second during a
+    // mutation burst). The embedded JSON is fixed for the life of a
+    // navigation, so cache it once per PR and invalidate on wipe.
+    let cachedEmbeddedStates = null;
 
     function getColors() {
         const mode = document.documentElement.getAttribute('data-color-mode');
@@ -51,10 +70,10 @@
         };
     }
 
-    function applyStyles(el, collapsed, viewed, colors) {
+    function applyStyles(el, collapsed, viewed, colors, italic = collapsed) {
         const color = collapsed || viewed ? colors.collapsed : '';
         el.style.setProperty('color', color, color ? 'important' : '');
-        el.style.fontStyle = collapsed ? 'italic' : '';
+        el.style.fontStyle = italic ? 'italic' : '';
         el.style.textDecoration = viewed ? 'line-through' : '';
         el.style.setProperty('text-decoration-color', viewed ? colors.strikethrough : '', viewed ? 'important' : '');
     }
@@ -101,14 +120,25 @@
         }
     }
 
-    function buildRegistry() {
-        files.clear();
-        dirs.clear();
-
-        const embeddedStates = getEmbeddedFileStates();
+    // Merges whatever's currently mounted into files/dirs without ever
+    // removing an entry. A rebuild can run against a sidebar that's only
+    // partially mounted - e.g. right after Turbo swaps back to an
+    // already-visited changes tab, before GitHub finishes re-rendering the
+    // tree, or simply because a folder is collapsed and its children aren't
+    // in the DOM at that instant - so treating "not currently found" as
+    // "doesn't exist" would permanently forget a folder/file the moment it's
+    // not visible, and nothing afterward would ever re-add it. Once a file or
+    // folder is known, it stays known for the life of this PR; only
+    // wipeRegistry (a real navigation to a different PR) is allowed to drop
+    // entries.
+    function mergeRegistry() {
+        if (!cachedEmbeddedStates) cachedEmbeddedStates = getEmbeddedFileStates();
+        for (const [hash, state] of cachedEmbeddedStates) {
+            if (!files.has(hash)) files.set(hash, state);
+        }
         document.querySelectorAll(`#pr-file-tree ${SEL.fileLink}`).forEach(link => {
             const hash = link.getAttribute('href').slice(1);
-            files.set(hash, embeddedStates.get(hash) ?? { collapsed: false, viewed: false });
+            if (!files.has(hash)) files.set(hash, { collapsed: false, viewed: false });
         });
 
         document.querySelectorAll('#pr-file-tree li[role="treeitem"][aria-expanded]').forEach(folder => {
@@ -121,16 +151,19 @@
                 .filter(h => files.has(h));
             if (childHashes.length === 0) return;
 
-            dirs.set(folder.id, { childHashes });
+            // Union with any previously-recorded children rather than
+            // overwriting - a folder mounted with fewer visible children now
+            // (e.g. collapsed) must not lose children it was known to have.
+            const existing = dirs.get(folder.id);
+            const merged = existing ? new Set([...existing.childHashes, ...childHashes]) : new Set(childHashes);
+            dirs.set(folder.id, { childHashes: [...merged] });
         });
-
-        registryPath = window.location.pathname;
     }
 
-    function needsRebuild() {
-        if (files.size === 0) return true;
-        // Only rebuild when the PR itself changes (SPA navigation), not on folder expand/collapse
-        return window.location.pathname !== registryPath;
+    function wipeRegistry() {
+        files.clear();
+        dirs.clear();
+        cachedEmbeddedStates = null;
     }
 
     function updateStates() {
@@ -169,19 +202,34 @@
             const label = getFolderLabel(folder);
             if (!label) continue;
 
+            if (!label.textContent.endsWith('/')) label.textContent += '/';
+
             const childFiles = dir.childHashes.map(h => files.get(h)).filter(Boolean);
             if (childFiles.length === 0) continue;
 
             const allCollapsed = childFiles.every(f => f.collapsed);
             const allViewed = childFiles.every(f => f.viewed);
+            const isOpen = folder.getAttribute('aria-expanded') === 'true';
 
-            // Always style the label from child states, even if the folder is itself collapsed
-            applyStyles(label, allCollapsed, allViewed, colors);
+            // Always style the label from child states, even if the folder is itself collapsed.
+            // Italics reflect the folder's own open/closed state, not its children's collapsed state.
+            applyStyles(label, allCollapsed, allViewed, colors, !isOpen);
         }
     }
 
     function sync() {
-        if (needsRebuild()) buildRegistry();
+        const slug = getPrSlug();
+        if (slug && slug !== currentPrSlug) {
+            wipeRegistry();
+            currentPrSlug = slug;
+        }
+        // Merged every pass, not just on navigation: it's non-destructive, so
+        // running it whenever more of the sidebar has mounted since the last
+        // pass (a folder just opened, a virtualized diff scrolled into view,
+        // Turbo finished a delayed re-render) lets a file/folder that missed
+        // the first snapshot still get picked up later, without ever losing
+        // one that was already known.
+        mergeRegistry();
         updateStates();
         syncStyles();
     }
@@ -215,6 +263,31 @@
 
     sync();
 
+    // Observe documentElement, not body: Turbo Drive navigations (e.g.
+    // navigating away to another PR tab and back to the changes tab) can
+    // replace document.body wholesale rather than mutating its children,
+    // which would silently detach an observer bound to the old body and
+    // leave it never firing again for the rest of the page's life.
+    // documentElement is never swapped.
     const observer = new MutationObserver(scheduleSync);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    // GitHub is a single-page app (Turbo): switching tabs within a PR (changes
+    // <-> overview <-> commits) updates the URL and morphs the DOM, but that
+    // morph can rewrite inline styles Turbo doesn't recognize as "ours"
+    // without ever touching a class attribute - the mutation observer above
+    // only watches class changes, so it can silently miss the exact moment
+    // our styling needs reapplying after a tab switch. Hook the history API
+    // and Turbo's own navigation event so a landing back on the changes tab
+    // always re-triggers sync(), even when the mutation observer alone misses it.
+    for (const method of ['pushState', 'replaceState']) {
+        const original = history[method];
+        history[method] = function () {
+            const result = original.apply(this, arguments);
+            sync();
+            return result;
+        };
+    }
+    window.addEventListener('popstate', sync);
+    document.addEventListener('turbo:load', sync);
 })();
