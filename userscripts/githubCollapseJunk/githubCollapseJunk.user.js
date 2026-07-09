@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.0
+// @version      1.1
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -8,6 +8,13 @@
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
+
+// Set to false in the console to silence per-file lifecycle logs.
+let DEBUG_LOGGING_ENABLED = false;
+
+if (!DEBUG_LOGGING_ENABLED) {
+    console.log('[githubCollapseJunk] Debug logging disabled. To enable, run `DEBUG_LOGGING_ENABLED = true` in the console.');
+}
 
 (function () {
     'use strict';
@@ -48,8 +55,7 @@
     const LINE_STATS_TOOLTIP_HANDLED_ATTR = 'data-collapse-junk-tooltip-handled';
     const CLASSIFICATION_LABEL_CLASS = 'gh-collapse-junk-classification-label';
     const LOG_PREFIX = '[githubCollapseJunk]';
-    // Set to false in the console to silence per-file lifecycle logs.
-    let DEBUG_LOGGING_ENABLED = false;
+
 
     // Phase-tagged, per-file lifecycle logging. Every line carries the file path
     // and phase, so a single file's journey can be followed by grepping its path
@@ -304,16 +310,17 @@
 
     // Reads the header's "+N"/"-N" text and parses out the raw counts for
     // updateHeaderLineStats()'s starting point, before this script touches those
-    // elements. Returns null if the header isn't mounted yet or either span
-    // doesn't parse - callers must treat null as "retry next reconcile() pass",
-    // not as a baseline of zero.
+    // elements. Returns null if the header isn't mounted yet - callers must treat
+    // null as "retry next reconcile() pass", not as a baseline of zero. Either
+    // the additions or deletions element may be missing (GitHub doesn't render
+    // them when the count is 0), in which case that count is treated as 0.
     function readHeaderLineStatsBaseline() {
         const additionsEl = document.querySelector(SEL.prHeaderAdditions);
         const deletionsEl = document.querySelector(SEL.prHeaderDeletions);
-        if (!additionsEl || !deletionsEl) return null;
-        const linesAdded = parseInt(additionsEl.textContent.replace(/[^\d]/g, ''), 10);
-        const linesDeleted = parseInt(deletionsEl.textContent.replace(/[^\d]/g, ''), 10);
-        if (Number.isNaN(linesAdded) || Number.isNaN(linesDeleted)) return null;
+        if (!additionsEl && !deletionsEl) return null;
+        const linesAdded = additionsEl ? parseInt(additionsEl.textContent.replace(/[^\d]/g, ''), 10) : 0;
+        const linesDeleted = deletionsEl ? parseInt(deletionsEl.textContent.replace(/[^\d]/g, ''), 10) : 0;
+        if ((additionsEl && Number.isNaN(linesAdded)) || (deletionsEl && Number.isNaN(linesDeleted))) return null;
         logPhase('(page)', 'header-line-stats-baseline', `added=${linesAdded} deleted=${linesDeleted}`);
         return { linesAdded, linesDeleted };
     }
@@ -576,6 +583,30 @@
     const SELF_CLICK_GUARD_MS = 150;
     const selfClicking = new Map(); // pathDigest -> timeout id
 
+    // Suppresses reconcile() while another extension runs a global collapse-all /
+    // expand-all gesture (bound to alt-click on a diff header - it toggles every
+    // file to one uniform state). We don't own that gesture, so reconcile() must
+    // stay hands-off for its whole mutation burst: otherwise it would either undo
+    // the sweep (springing every non-matching file back) or double-toggle a file
+    // the other extension hasn't reached yet. Set true the moment we see the
+    // alt-click; cleared a short quiet period after the last sweep mutation lands,
+    // at which point one reconcile() confirms the DOM already matches our updated
+    // shouldBeCollapsed. Re-armed on every mutation seen mid-sweep (via
+    // reconcileObserver) so a long, many-file sweep never releases early - the
+    // window tracks "quiet since the last mutation", not a fixed duration.
+    let altSweepActive = false;
+    let altSweepQuietTimer = null;
+    const ALT_SWEEP_QUIET_MS = 300;
+
+    function extendAltSweep() {
+        altSweepActive = true;
+        clearTimeout(altSweepQuietTimer);
+        altSweepQuietTimer = setTimeout(() => {
+            altSweepActive = false;
+            reconcile();
+        }, ALT_SWEEP_QUIET_MS);
+    }
+
     // The only place that ever clicks a collapse button programmatically. Returns
     // false (caller should retry on the next reconcile pass) if the header is
     // mounted but its chevron/button isn't found yet - GitHub renders the header
@@ -617,6 +648,11 @@
     // (tier-1, tier-2 below) doesn't need to: the collapse check for that file
     // runs later in this same loop iteration.
     function reconcile() {
+        // A global collapse-all/expand-all gesture from another extension is in
+        // flight; leave every file alone until it goes quiet (see altSweepActive).
+        // Covers direct callers too (tier-3 .then, classifyDeferredOnOpen), not
+        // just the observer path, so nothing corrects a file mid-sweep.
+        if (altSweepActive) return;
         for (const [pathDigest, file] of files) {
             if (selfClicking.has(pathDigest)) continue;
             const header = getHeader(getDiffEntry(pathDigest));
@@ -949,6 +985,8 @@
         files.clear();
         selfClicking.forEach(clearTimeout);
         selfClicking.clear();
+        clearTimeout(altSweepQuietTimer);
+        altSweepActive = false;
         folderCollapseState.clear();
         toggleButtonEl = null;
         hideLineStatsTooltip();
@@ -1015,7 +1053,17 @@
     // see diff-list mutations (collapsing, mounting) - document.body, not
     // documentElement, is fine here since a Turbo body swap is instead caught by
     // the pageReadyObserver above triggering a fresh run().
-    const reconcileObserver = new MutationObserver(reconcile);
+    const reconcileObserver = new MutationObserver(() => {
+        // While another extension's collapse-all/expand-all sweep is in flight,
+        // every mutation it produces just extends the quiet window and defers our
+        // reconcile - see altSweepActive. reconcile() itself also early-returns
+        // during the sweep, so this guard is only about re-arming the timer.
+        if (altSweepActive) {
+            extendAltSweep();
+            return;
+        }
+        reconcile();
+    });
     reconcileObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 
     // Delegated listener for manual user clicks on a diff header's collapse
@@ -1033,6 +1081,24 @@
         const pathDigest = pathDigestFromHeader(header);
         const file = pathDigest && files.get(pathDigest);
         if (!file || selfClicking.has(pathDigest)) return;
+
+        // Alt-click is another extension's collapse-all/expand-all gesture: it
+        // drives every file to one uniform state, keyed off the clicked file's
+        // current state (expanded -> collapse everything, collapsed -> expand
+        // everything). We don't own it and must not fight it - adopt its target
+        // as our own desired state for every file, and sync the global toggle
+        // intent so a classification resolving later can't re-collapse a file the
+        // gesture just expanded. extendAltSweep() then keeps reconcile() hands-off
+        // for the burst. We never preventDefault: the other extension does the
+        // actual collapsing.
+        if (e.altKey) {
+            const targetCollapsed = !isCollapsed(header);
+            globalHideJunk = targetCollapsed;
+            for (const f of files.values()) f.shouldBeCollapsed = targetCollapsed;
+            extendAltSweep();
+            return;
+        }
+
         const guardTimer = setTimeout(() => selfClicking.delete(pathDigest), SELF_CLICK_GUARD_MS);
         selfClicking.set(pathDigest, guardTimer);
         requestAnimationFrame(() => requestAnimationFrame(() => {
