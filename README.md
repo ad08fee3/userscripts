@@ -15,6 +15,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Hides whitespace changes in GitHub diffs by default, while still letting you opt back in. |
 | [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
 | [instagramFixer](userscripts/instagramFixer/README.md) | Closes the stupid "pLeAsE lOg iN" modal and unmutes Instagram reels automatically. |
+| [oktaAutoLogin](userscripts/oktaAutoLogin/README.md) | Automatically submits the Okta login form if your username is pre-filled. Reduces a few clicks from the  login process. |
 
 ## Deprecated
 
