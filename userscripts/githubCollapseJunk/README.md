@@ -24,7 +24,6 @@ Works great in conjunction with the [File Tree Colors](https://github.com/ad08fe
 
 ## To-do / Features to add
 
-- Don't re-open "viewed" files, even if they are junk
 - Add a "force collapse" and "force open" button?
 
 These will involve creating settings that the user can configure.

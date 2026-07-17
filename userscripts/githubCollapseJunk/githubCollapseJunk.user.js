@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.2
+// @version      1.3
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -91,11 +91,14 @@ if (!DEBUG_LOGGING_ENABLED) {
     // the one fetched body, in declared order, first match wins.
     const classifiers = [
         { tier: 1, name: 'Deleted file', displayName: 'Deleted', classify: (fileMeta) => fileMeta.status === 'REMOVED' },
-        { tier: 1, name: 'Generated file', displayName: 'Auto-generated', classify: (fileMeta) => {
-            return fileMeta.newTreeEntry?.isGenerated === true || /oas_.*_gen\.go$/.test(fileMeta.path);
-        }},
+        {
+            tier: 1, name: 'Generated file', displayName: 'Auto-generated', classify: (fileMeta) => {
+                return fileMeta.newTreeEntry?.isGenerated === true || /oas_.*_gen\.go$/.test(fileMeta.path);
+            }
+        },
         { tier: 1, name: 'Binary', displayName: 'Binary file', classify: (fileMeta) => fileMeta.isBinary === true },
         { tier: 1, name: 'Tests', displayName: 'Test', classify: (fileMeta) => /_test\.go$/.test(fileMeta.path) },
+        { tier: 1, name: 'apptest directory', displayName: 'Test', classify: (fileMeta) => /\/apptest\//.test(fileMeta.path) },
         { tier: 1, name: 'Mocks', displayName: 'Mock', classify: (fileMeta) => /_mock\.go$/.test(fileMeta.path) },
         { tier: 1, name: 'package-lock.json', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)package-lock\.json$/.test(fileMeta.path) },
         { tier: 1, name: 'go.mod/go.sum', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)go\.(mod|sum)$/.test(fileMeta.path) },
@@ -880,13 +883,19 @@ if (!DEBUG_LOGGING_ENABLED) {
 
     // Flips the global intent and applies it to every currently-known junk file,
     // overriding any prior manual per-file override - per spec, the global toggle
-    // always wins. reconcile() is what actually drives the DOM to match; called
-    // explicitly here per stuck-state invariant 2, since nothing else guarantees
-    // a reconcile pass runs if the page happens to be otherwise quiet.
+    // always wins. When showing junk, viewed files remain collapsed. reconcile()
+    // is what actually drives the DOM to match; called explicitly here per
+    // stuck-state invariant 2, since nothing else guarantees a reconcile pass runs
+    // if the page happens to be otherwise quiet.
     function toggleJunk() {
         globalHideJunk = !globalHideJunk;
         for (const file of files.values()) {
-            if (isJunk(file)) file.shouldBeCollapsed = globalHideJunk;
+            if (isJunk(file)) {
+                // When hiding junk, always collapse. When showing junk, keep viewed files collapsed.
+                file.shouldBeCollapsed = globalHideJunk
+                    // If a file is viewed, leave it collapsed. If it's already open and we are "showing" the junk, leave it open.
+                    || (file.shouldBeCollapsed && file.viewed);
+            }
         }
         reconcile();
     }
