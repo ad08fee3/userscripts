@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         oktaBackgroundLogin
-// @version      1.0
+// @version      1.2
 // @description  Okta doesn't like to log in unless the tab is focused. This makes it log in even if it's in the background.
 // @match        https://*.okta.com/app/bookmark/*/login
 // @match        https://*.okta.com/oauth2/*/*
