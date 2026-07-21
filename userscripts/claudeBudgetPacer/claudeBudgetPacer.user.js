@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.0
+// @version      1.1
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -57,7 +57,8 @@
         return daysCount;
     }
 
-    // Count business hours (Mon-Fri, 8am-6pm) between two dates in local time
+    // Count business hours (Mon-Fri, 8am-6pm) between two dates in local time.
+    // Counts full 10-hour days for each business day in range; does not account for partial hours on the current day.
     function countBusinessHours(startDate, endDate) {
         let hoursCount = 0;
         let currentDate = new Date(startDate);
@@ -98,7 +99,7 @@
     function getMonthProgressPercent(now, resetDate) {
         const monthStart = new Date(resetDate.getFullYear(), resetDate.getMonth(), 1);
         const totalBusinessHours = countBusinessHours(monthStart, resetDate);
-        const elapsedBusinessHours = countBusinessHours(monthStart, now) + getRemainingBusinessHoursToday(now, resetDate);
+        const elapsedBusinessHours = countBusinessHours(monthStart, now) - getRemainingBusinessHoursToday(now, resetDate);
 
         if (totalBusinessHours === 0) return 0;
         return Math.min(100, Math.max(0, (elapsedBusinessHours / totalBusinessHours) * 100));
@@ -221,9 +222,9 @@
         const totalBusinessDays = countBusinessDays(monthStart, resetDate);
         const currentBusinessDay = countBusinessDays(monthStart, now);
         const totalBusinessHours = countBusinessHours(monthStart, resetDate);
-        const elapsedBusinessHours = countBusinessHours(monthStart, now);
+        const rawElapsedBusinessHours = countBusinessHours(monthStart, now);
         const todayRemainingHours = getRemainingBusinessHoursToday(now, resetDate);
-        const currentElapsedTotal = elapsedBusinessHours + todayRemainingHours;
+        const elapsedBusinessHours = rawElapsedBusinessHours - todayRemainingHours;
         const remainingBusinessHours = countBusinessHours(now, resetDate) + todayRemainingHours;
         const budgetPerHour = getBudgetPerBusinessHour(amounts.spent, amounts.limit, now, resetDate);
 
@@ -237,9 +238,9 @@
             calendarDays: `Day ${currentCalendarDay} of ${totalCalendarDays}`,
             businessDays: `Business day ${currentBusinessDay} of ${totalBusinessDays}`,
             totalBusinessHours,
-            elapsedBusinessHours,
+            rawElapsedBusinessHours,
             todayRemainingHours,
-            currentElapsedTotal,
+            elapsedBusinessHours,
             monthProgressPercent: monthProgressPercent.toFixed(2) + '%',
             remainingBusinessHours,
             budgetPerHour: '$' + budgetPerHour.toFixed(2) + '/hour',
