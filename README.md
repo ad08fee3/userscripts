@@ -18,6 +18,14 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [oktaAutoLogin](userscripts/oktaAutoLogin/README.md) | Automatically submits the Okta login form if your username is pre-filled. Reduces a few clicks from the  login process. |
 | [oktaBackgroundLogin](userscripts/oktaBackgroundLogin/README.md) | Allows Okta login to proceed in background tabs, instead of waiting for the tab to focus. |
 
+## Auto-Closers
+
+These scripts automatically close redirect/launch pages that get left behind when you launch an app by clicking on a link, like Zoom or Slack.
+
+- [AWS SSO](userscripts/autoclosers/awsSso/README.md) - Closes the AWS SSO tab after logging in.
+- [Slack](userscripts/autoclosers/slack/README.md) - Closes Slack redirect pages once the app launches.
+- [Zoom](userscripts/autoclosers/zoom/README.md) - Closes Zoom meeting launch tabs once the app launches.
+
 ## Deprecated
 
 This repo still contains some older scripts that have been superseded by other scripts/extensions. See the [Deprecated README](userscripts/deprecated/README.md) for the full list.
