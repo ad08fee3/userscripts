@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         autoCloseSlack
-// @version      1.0
+// @version      1.1
 // @description  Automatically closes Slack redirect pages once the app launches.
 // @match        https://*.slack.com/archives/*
 // @match        https://*.slack.com/app_redirect*
 // @match        https://*.slack.com/ssb/signin_redirect*
+// @match        https://*.enterprise.slack.com/?redir=*signin_redirect*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/slack/autoCloseSlack.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/slack/autoCloseSlack.user.js
 // @grant        GM_getValue
@@ -37,6 +38,12 @@
             pageText.includes('launching')) {
             return true;
         }
+
+        const url = window.location.href;
+        if (url.includes('redir=') && url.includes('signin_redirect')) {
+            return true;
+        }
+
         return false;
     }
 
