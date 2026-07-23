@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.1
+// @version      1.2
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -275,16 +275,17 @@
         // Update the meter fill in the month progress row
         const monthMeter = monthProgressRow.querySelector('[data-cds="Meter"]');
         if (monthMeter) {
-            // Update the inner fill bar width
+            // Update the inner fill bar transform
             const fillBar = monthMeter.querySelector('[role="meter"]');
             if (fillBar) {
                 const innerDiv = fillBar.querySelector('div');
                 if (innerDiv) {
-                    innerDiv.style.width = monthProgressPercent + '%';
+                    // Use the same transform calculation as the original component
+                    innerDiv.style.transform = `translateX(calc(var(--_meter-dir, -1) * (100% - min(100%, max(${monthProgressPercent}%, 8px)))))`;
                 }
                 // Update aria attributes
                 fillBar.setAttribute('aria-valuenow', monthProgressPercent.toFixed(1));
-                fillBar.setAttribute('aria-valuetext', Math.round(monthProgressPercent) + '% over');
+                fillBar.setAttribute('aria-valuetext', Math.round(monthProgressPercent) + '% through');
             }
         }
 
