@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Instagram Reels: - Close Modal and Unmute
-// @version      1.0
+// @version      1.1
 // @description  Makes instagram usable my auto-closing the naggy modal and unmuting the reel
 // @match        https://www.instagram.com/reel/*
 // @match        https://www.instagram.com/*/reel/*
+// @match        https://www.instagram.com/*/p/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/instagramFixer/instagramFixer.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/instagramFixer/instagramFixer.user.js
 // @grant        none
@@ -17,7 +18,7 @@ function findSvgTitle(text) {
         .find(t => t.textContent.trim() === text);
 }
 
-function clickBySvgTitle(titleText, description) {
+function clickBySvgTitle(titleText) {
     const title = findSvgTitle(titleText);
 
     if (!title) {
@@ -32,31 +33,65 @@ function clickBySvgTitle(titleText, description) {
             element.tabIndex >= 0
         ) {
             element.click();
-            break;
+            return true;
         }
         element = element.parentElement;
     }
-    return true;
+
+    return false;
 }
 
-(async function () {
-    'use strict';
+let runId = 0;
+
+async function processPage() {
+    const myRun = ++runId;
 
     let closePresent = true;
     let audioMuted = true;
 
+    let closeEverReturnedTrue = false;
+    let muteEverReturnedTrue = false;
+
     let attempts = 0;
     const maxAttempts = 40;
 
-    while ((closePresent || audioMuted) && attempts < maxAttempts) {
+    while (
+        myRun === runId &&
+        attempts < maxAttempts &&
+        ((!closeEverReturnedTrue || !muteEverReturnedTrue) || closePresent || audioMuted)
+    ) {
         attempts++;
 
-        if (closePresent) {
-            closePresent = clickBySvgTitle("Close", "close button");
+        if (!closeEverReturnedTrue || closePresent) {
+            closePresent = clickBySvgTitle("Close");
+            if (closePresent) {
+                closeEverReturnedTrue = true;
+            }
         }
-        if (audioMuted) {
-            audioMuted = !clickBySvgTitle("Audio is muted", "mute button");
+
+        if (!muteEverReturnedTrue || audioMuted) {
+            audioMuted = clickBySvgTitle("Audio is muted") || !(findSvgTitle('Audio is playing'));
+            if (audioMuted) {
+                muteEverReturnedTrue = true;
+            }
         }
         await sleep(100);
     }
+}
+
+(function () {
+    "use strict";
+
+    processPage();
+
+    let lastUrl = location.href;
+
+    setInterval(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            console.log("URL changed:", lastUrl);
+
+            processPage();
+        }
+    }, 100);
 })();
