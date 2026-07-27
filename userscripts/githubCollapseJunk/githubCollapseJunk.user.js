@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.4
+// @version      1.5
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -98,7 +98,12 @@ if (!DEBUG_LOGGING_ENABLED) {
         },
         { tier: 1, name: 'Binary', displayName: 'Binary file', classify: (fileMeta) => fileMeta.isBinary === true },
         { tier: 1, name: 'Test Files', displayName: 'Test', classify: (fileMeta) => {
-            const testPatterns = [/_test\.go$/, /\.test\.tsx$/, /\.test\.ts$/, /\.test-d\.ts$/];
+            const testPatterns = [
+                /_test\.go$/,
+                /\.spec\.ts$/,
+                /\.test\.tsx$/,
+                /\.test\.ts$/,
+                /\.test-d\.ts$/];
             return testPatterns.some(pattern => pattern.test(fileMeta.path));
         } },
         { tier: 1, name: 'apptest directory', displayName: 'Test', classify: (fileMeta) => /\/apptest\//.test(fileMeta.path) },
