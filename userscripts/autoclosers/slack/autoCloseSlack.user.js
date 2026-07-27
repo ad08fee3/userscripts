@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         autoCloseSlack
-// @version      1.1
+// @version      1.2
 // @description  Automatically closes Slack redirect pages once the app launches.
 // @match        https://*.slack.com/archives/*
 // @match        https://*.slack.com/app_redirect*
@@ -44,6 +44,14 @@
             return true;
         }
 
+        return false;
+    }
+
+    function shouldBlockAutoClose() {
+        const pageText = document?.body?.innerText?.toLowerCase() || '';
+        if (pageText.includes('sign in to twilio-enterprise')) {
+            return true;
+        }
         return false;
     }
 
@@ -195,7 +203,7 @@
     const pollInterval = setInterval(() => {
         pollTime += POLL_INTERVAL_MS;
 
-        if (isRedirectPageDetected()) {
+        if (isRedirectPageDetected() && !shouldBlockAutoClose()) {
             clearInterval(pollInterval);
             setupUI();
             return;
