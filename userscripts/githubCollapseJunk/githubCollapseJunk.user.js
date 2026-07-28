@@ -99,9 +99,11 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'Binary', displayName: 'Binary file', classify: (fileMeta) => fileMeta.isBinary === true },
         { tier: 1, name: 'Test Files', displayName: 'Test', classify: (fileMeta) => {
             const testPatterns = [
+                /\/\.storybook\//,
                 /_test\.go$/,
                 /\.spec\.(ts|tsx|js|jsx)$/,
                 /\.test\.(ts|tsx|js|jsx)$/,
+                /\.stories\.(ts|tsx|js|jsx)$/,
                 /\.test-d\.(ts|tsx|js|jsx)$/];
             return testPatterns.some(pattern => pattern.test(fileMeta.path));
         } },
