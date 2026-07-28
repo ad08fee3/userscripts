@@ -135,6 +135,13 @@ if (!DEBUG_LOGGING_ENABLED) {
             shouldFetch: (fileMeta) => /openapi/.test(fileMeta.path) && /\.yaml$/.test(fileMeta.path),
             classify: (fileMeta, fileContent) => fileContent.includes('AUTO-GENERATED - DO NOT EDIT'),
         },
+        {
+            tier: 3,
+            name: '.types.ts auto-generated',
+            displayName: 'Auto-generated',
+            shouldFetch: (fileMeta) => /\.types\.ts$/.test(fileMeta.path),
+            classify: (fileMeta, fileContent) => fileContent.split('\n', 1)[0].includes('This file is auto-generated. Do not edit manually.'),
+        },
         // A "too large to render" file isn't necessarily junk on its own -
         // it's promoted to a Tier 3 fetch so we can look past the placeholder
         // at the real content before deciding whether it's junk.
