@@ -10,6 +10,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | --- | --- |
 | [claudeBudgetPacer](userscripts/claudeBudgetPacer/README.md) | Shows spending progress relative to the billing month on Claude's usage page. |
 | [githubAutoSso](userscripts/githubAutoSso/README.md) | Automatically completes GitHub's SSO re-auth banner in a background tab and closes it when done. |
+| [githubSsoAutoContinue](userscripts/githubSsoAutoContinue/README.md) | Automatically clicks Continue on GitHub's organization single sign-on page. |
 | [githubFileTreeColors](userscripts/githubFileTreeColors/README.md) | Colors the PR sidebar file tree to reflect each file's collapsed and viewed state at a glance. |
 | [githubCollapsibleHeaderBars](userscripts/githubCollapsibleHeaderBars/README.md) | Allows you to click anywhere on a file header to collapse its content. Expands upon the functionality added by Refined GitHub. |
 | [githubCollapseJunk](userscripts/githubCollapseJunk/README.md) | Automatically collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages. |
