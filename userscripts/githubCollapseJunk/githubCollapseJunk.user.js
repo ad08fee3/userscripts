@@ -110,7 +110,7 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'apptest directory', displayName: 'Test', classify: (fileMeta) => /\/apptest\//.test(fileMeta.path) },
         { tier: 1, name: 'Mocks', displayName: 'Mock', classify: (fileMeta) => /_mock\.go$/.test(fileMeta.path) },
         { tier: 1, name: 'package-lock.json', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)package-lock\.json$/.test(fileMeta.path) },
-        { tier: 1, name: 'go.mod/go.sum', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)go\.(mod|sum)$/.test(fileMeta.path) },
+        { tier: 1, name: 'go.mod/go.sum', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)go\.(mod|sum|work\.sum)$/.test(fileMeta.path) },
         { tier: 1, name: 'SVG', displayName: 'Image', classify: (fileMeta) => /\.svg$/.test(fileMeta.path) },
         // Tier 2: rendered diff-body text, reached only when Tier 1 found no
         // match. Covers files diffContents is silent about, like a generated
