@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.2
+// @version      1.3
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -39,88 +39,100 @@
         );
     }
 
-    // Count business days (Mon-Fri) between two dates in local time
-    function countBusinessDays(startDate, endDate) {
-        let daysCount = 0;
-        let currentDate = new Date(startDate);
-        currentDate.setHours(0, 0, 0, 0);
+    // The business day runs 8am-5pm, which lines up with the 5pm budget reset.
+    const BUSINESS_DAY_START_HOUR = 8;
+    const BUSINESS_DAY_END_HOUR = 17;
+    const HOURS_PER_BUSINESS_DAY = BUSINESS_DAY_END_HOUR - BUSINESS_DAY_START_HOUR;
+    const MS_PER_HOUR = 60 * 60 * 1000;
 
-        while (currentDate < endDate) {
-            const dayOfWeek = currentDate.getDay();
-            // Monday = 1, Friday = 5
-            if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+    function isWeekday(date) {
+        const dayOfWeek = date.getDay();
+        return dayOfWeek >= 1 && dayOfWeek <= 5;
+    }
+
+    // Count business days (Mon-Fri) from startDate's day through endDate's day,
+    // inclusive on both ends. A day whose business window has already closed at
+    // startDate does not count, so a window that opens at a 5pm reset starts the
+    // following day.
+    function countBusinessDays(startDate, endDate) {
+        const cursor = new Date(startDate);
+        cursor.setHours(0, 0, 0, 0);
+        if (startDate.getHours() >= BUSINESS_DAY_END_HOUR) {
+            cursor.setDate(cursor.getDate() + 1);
+        }
+
+        const last = new Date(endDate);
+        last.setHours(0, 0, 0, 0);
+
+        let daysCount = 0;
+        while (cursor <= last) {
+            if (isWeekday(cursor)) {
                 daysCount += 1;
             }
-            currentDate.setDate(currentDate.getDate() + 1);
+            cursor.setDate(cursor.getDate() + 1);
         }
 
         return daysCount;
     }
 
-    // Count business hours (Mon-Fri, 8am-6pm) between two dates in local time.
-    // Counts full 10-hour days for each business day in range; does not account for partial hours on the current day.
-    function countBusinessHours(startDate, endDate) {
-        let hoursCount = 0;
-        let currentDate = new Date(startDate);
-        currentDate.setHours(0, 0, 0, 0);
+    function dayStart(date) {
+        const d = new Date(date);
+        d.setHours(BUSINESS_DAY_START_HOUR, 0, 0, 0);
+        return d;
+    }
 
-        while (currentDate < endDate) {
-            const dayOfWeek = currentDate.getDay();
-            // Monday = 1, Friday = 5
-            if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-                hoursCount += 10; // 8am to 6pm = 10 hours
+    function dayEnd(date) {
+        const d = new Date(date);
+        d.setHours(BUSINESS_DAY_END_HOUR, 0, 0, 0);
+        return d;
+    }
+
+    // Business hours (Mon-Fri, 8am-5pm) between two dates, clipping partial days
+    // to the actual overlap so a mid-morning "now" is counted precisely.
+    function businessHoursBetween(startDate, endDate) {
+        if (endDate <= startDate) return 0;
+
+        let ms = 0;
+        const cursor = new Date(startDate);
+        cursor.setHours(0, 0, 0, 0);
+
+        while (cursor < endDate) {
+            if (isWeekday(cursor)) {
+                const overlapStart = Math.max(startDate.getTime(), dayStart(cursor).getTime());
+                const overlapEnd = Math.min(endDate.getTime(), dayEnd(cursor).getTime());
+                if (overlapEnd > overlapStart) {
+                    ms += overlapEnd - overlapStart;
+                }
             }
-            currentDate.setDate(currentDate.getDate() + 1);
+            cursor.setDate(cursor.getDate() + 1);
         }
 
-        return hoursCount;
+        return ms / MS_PER_HOUR;
     }
 
-    // Count remaining business hours from now to end of day
-    function getRemainingBusinessHoursToday(now, resetDate) {
-        const currentHour = now.getHours();
-        const dayOfWeek = now.getDay();
-
-        // If it's a weekend or before 8am or after 6pm, no business hours remain today
-        if (dayOfWeek === 0 || dayOfWeek === 6 || currentHour < 8 || currentHour >= 18) {
-            return 0;
-        }
-
-        // If past 6pm, no more hours today
-        if (currentHour >= 18) {
-            return 0;
-        }
-
-        // Hours remaining = 18 (6pm) - current hour
-        return Math.max(0, 18 - currentHour);
-    }
-
-    // Calculate percentage through current month by business hours
-    function getMonthProgressPercent(now, resetDate) {
-        const monthStart = new Date(resetDate.getFullYear(), resetDate.getMonth(), 1);
-        const totalBusinessHours = countBusinessHours(monthStart, resetDate);
-        const elapsedBusinessHours = countBusinessHours(monthStart, now) - getRemainingBusinessHoursToday(now, resetDate);
-
+    // Percentage through the budget window, measured in business hours
+    function getWindowProgressPercent(windowStart, now, resetDate) {
+        const totalBusinessHours = businessHoursBetween(windowStart, resetDate);
         if (totalBusinessHours === 0) return 0;
-        return Math.min(100, Math.max(0, (elapsedBusinessHours / totalBusinessHours) * 100));
+        const remaining = businessHoursBetween(now, resetDate);
+        const elapsed = totalBusinessHours - remaining;
+        return Math.min(100, Math.max(0, (elapsed / totalBusinessHours) * 100));
     }
 
     // Calculate recommended spend per business hour to hit limit by reset date
     function getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate) {
-        const remainingBusinessHours = countBusinessHours(now, resetDate) + getRemainingBusinessHoursToday(now, resetDate);
+        const remainingBusinessHours = businessHoursBetween(now, resetDate);
         if (remainingBusinessHours === 0) return 0;
         return (limitAmount - spentAmount) / remainingBusinessHours;
     }
 
-    // Calculate recommended spend per business day (10 business hours) to hit limit
+    // Calculate recommended spend per business day to hit limit
     function getBudgetPerBusinessDay(spentAmount, limitAmount, now, resetDate) {
-        const budgetPerHour = getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate);
-        return budgetPerHour * 10; // 10 business hours per day (8am-6pm)
+        return getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate) * HOURS_PER_BUSINESS_DAY;
     }
 
     // Parse reset date from text like "Resets Fri, Jul 31, 5:00 PM PDT"
     function parseResetDate(resetText) {
-        // Extract day and month from text like "Resets Fri, Jul 31, 5:00 PM PDT"
         const match = resetText.match(/(\w+)\s+(\d+)/);
         if (!match) return null;
 
@@ -135,18 +147,78 @@
         const month = months[monthStr];
         if (month === undefined) return null;
 
-        // Create date for the reset date in local timezone
-        // We'll use current year, but could adjust if reset date is in next year
-        let year = new Date().getFullYear();
-        const resetDate = new Date(year, month, dayStr);
+        // The reset happens at a wall-clock time on that day (5:00 PM in practice).
+        // Without it the final day of the window would be dropped entirely.
+        let hour = BUSINESS_DAY_END_HOUR;
+        let minute = 0;
+        const timeMatch = resetText.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (timeMatch) {
+            hour = parseInt(timeMatch[1]) % 12;
+            if (timeMatch[3].toUpperCase() === 'PM') hour += 12;
+            minute = parseInt(timeMatch[2]);
+        }
+
+        const year = new Date().getFullYear();
+        const resetDate = new Date(year, month, dayStr, hour, minute, 0, 0);
 
         // If the reset date is in the past, it must be next year
-        const now = getLocalNow();
-        if (resetDate < now) {
+        if (resetDate < getLocalNow()) {
             resetDate.setFullYear(year + 1);
         }
 
         return resetDate;
+    }
+
+    // Remembering past reset times lets us measure the window from the previous
+    // reset rather than assuming it started on the 1st of the month.
+    const DEADLINE_STORAGE_KEY = 'claudeBudgetPacer.deadlines';
+    const MAX_STORED_DEADLINES = 2;
+    const MAX_WINDOW_DAYS = 45;
+
+    function readStoredDeadlines() {
+        try {
+            const raw = localStorage.getItem(DEADLINE_STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .map(value => new Date(value))
+                .filter(date => !isNaN(date.getTime()));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function writeStoredDeadlines(deadlines) {
+        try {
+            const serialized = deadlines
+                .slice()
+                .sort((a, b) => a - b)
+                .slice(-MAX_STORED_DEADLINES)
+                .map(date => date.toISOString());
+            localStorage.setItem(DEADLINE_STORAGE_KEY, JSON.stringify(serialized));
+        } catch (e) {
+            // Storage unavailable; fall back to the default window start.
+        }
+    }
+
+    // Record the current reset time and return the start of the current window:
+    // the most recent previously-seen reset, or the 1st of the reset month.
+    function resolveWindowStart(resetDate, now) {
+        const stored = readStoredDeadlines();
+        const known = stored.some(date => date.getTime() === resetDate.getTime());
+        writeStoredDeadlines(known ? stored : stored.concat([resetDate]));
+
+        const earliestAllowed = new Date(resetDate.getTime() - MAX_WINDOW_DAYS * 24 * MS_PER_HOUR);
+        const candidates = stored.filter(date =>
+            date < resetDate && date <= now && date > earliestAllowed
+        );
+
+        if (candidates.length === 0) {
+            return new Date(resetDate.getFullYear(), resetDate.getMonth(), 1, 0, 0, 0, 0);
+        }
+
+        return new Date(Math.max.apply(null, candidates.map(date => date.getTime())));
     }
 
     // Parse spend amount from text like "$499.17 of $2,000.00 spent"
@@ -212,39 +284,37 @@
         if (!amounts || !resetDate) return;
 
         const now = getLocalNow();
-        const monthProgressPercent = getMonthProgressPercent(now, resetDate);
+        const windowStart = resolveWindowStart(resetDate, now);
+        const monthProgressPercent = getWindowProgressPercent(windowStart, now, resetDate);
         const budgetPerBusinessDay = getBudgetPerBusinessDay(amounts.spent, amounts.limit, now, resetDate);
 
-        // Log calculations for debugging
-        const monthStart = new Date(resetDate.getFullYear(), resetDate.getMonth(), 1);
         const totalCalendarDays = resetDate.getDate();
         const currentCalendarDay = now.getDate();
-        const totalBusinessDays = countBusinessDays(monthStart, resetDate);
-        const currentBusinessDay = countBusinessDays(monthStart, now);
-        const totalBusinessHours = countBusinessHours(monthStart, resetDate);
-        const rawElapsedBusinessHours = countBusinessHours(monthStart, now);
-        const todayRemainingHours = getRemainingBusinessHoursToday(now, resetDate);
-        const elapsedBusinessHours = rawElapsedBusinessHours - todayRemainingHours;
-        const remainingBusinessHours = countBusinessHours(now, resetDate) + todayRemainingHours;
+        const totalBusinessDays = countBusinessDays(windowStart, resetDate);
+        const currentBusinessDay = countBusinessDays(windowStart, now);
+        const totalBusinessHours = businessHoursBetween(windowStart, resetDate);
+        const remainingBusinessHours = businessHoursBetween(now, resetDate);
+        const elapsedBusinessHours = totalBusinessHours - remainingBusinessHours;
         const budgetPerHour = getBudgetPerBusinessHour(amounts.spent, amounts.limit, now, resetDate);
+        const spentPercent = amounts.limit === 0 ? 0 : (amounts.spent / amounts.limit) * 100;
 
         console.log('[claudeBudgetPacer]', {
             now: now.toLocaleDateString() + ' ' + now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' }),
-            resetDate: resetDate.toLocaleDateString(),
-            monthStart: monthStart.toLocaleDateString(),
+            resetDate: resetDate.toLocaleString(),
+            windowStart: windowStart.toLocaleString(),
             spent: amounts.spent,
             limit: amounts.limit,
             remaining: amounts.limit - amounts.spent,
             calendarDays: `Day ${currentCalendarDay} of ${totalCalendarDays}`,
             businessDays: `Business day ${currentBusinessDay} of ${totalBusinessDays}`,
             totalBusinessHours,
-            rawElapsedBusinessHours,
-            todayRemainingHours,
             elapsedBusinessHours,
-            monthProgressPercent: monthProgressPercent.toFixed(2) + '%',
             remainingBusinessHours,
+            monthProgressPercent: monthProgressPercent.toFixed(2) + '%',
+            spentPercent: spentPercent.toFixed(2) + '%',
+            paceDeltaPercent: (spentPercent - monthProgressPercent).toFixed(2) + '%',
             budgetPerHour: '$' + budgetPerHour.toFixed(2) + '/hour',
-            budgetPerBusinessDay: '$' + budgetPerBusinessDay.toFixed(2) + '/business day (10 hours)'
+            budgetPerBusinessDay: '$' + budgetPerBusinessDay.toFixed(2) + `/business day (${HOURS_PER_BUSINESS_DAY} hours)`
         });
 
         // Find the existing meter in the spend row
