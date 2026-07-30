@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.4
+// @version      1.5
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -13,6 +13,12 @@
     'use strict';
 
     const HANDLED_ATTR = 'data-collapsible-handled';
+
+    // Bars carrying GitHub's own bar-wide click-to-toggle behavior. Resolved/outdated
+    // comment threads on the PR overview page use .js-toggle-outdated-comments, where
+    // GitHub already toggles the thread when the bar itself is clicked. Synthesizing a
+    // second click on the chevron would toggle it straight back, so leave those alone.
+    const NATIVE_BAR_TOGGLE_SELECTOR = '.js-toggle-outdated-comments';
 
     // Diff file header handlers - split out so we can apply deferToRefinedGithub when
     // needed (Refined Github already handles click-to-collapse on a few pages).
@@ -83,6 +89,8 @@
 
         // Make header cursor a pointer
         header.style.cursor = 'pointer';
+
+        if (header.matches(NATIVE_BAR_TOGGLE_SELECTOR)) return;
 
         // Click handler for the entire header
         header.addEventListener('click', (e) => {
