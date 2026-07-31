@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.5
+// @version      1.6
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -49,12 +49,21 @@
         }
     };
 
-    // Diff file headers deferred to Refined Github when it's installed, with inline
-    // comment threads always fully handled. Shared by the PR Files, commit, and
-    // compare pages since Refined Github handles click-to-collapse on all of them.
+    // File-level comment threads ("Comment on file"), shown above the diff of the file
+    // they're attached to. The collapse chevron is a direct child of the container, so
+    // scope to that and avoid picking up buttons inside the expanded comment body.
+    const fileCommentHandler = {
+        selector: '[class*="FileReviewThread-module__ReviewThreadContainer__"]',
+        getButton: (header) => header.querySelector(':scope > button[data-component="IconButton"]')
+    };
+
+    // Diff file headers deferred to Refined Github when it's installed, with comment
+    // threads always fully handled. Shared by the PR Files, commit, and compare pages
+    // since Refined Github handles click-to-collapse on all of them.
     const deferredDiffFileHandlers = [
         ...diffFileHeaderSelectors.map(h => ({ ...h, deferToRefinedGithub: true })),
         inlineCommentHandler,
+        fileCommentHandler,
     ];
 
     // Map of URL patterns to arrays of handlers
