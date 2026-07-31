@@ -5,3 +5,5 @@
 Enables the "Hide whitespace changes" option by default in GitHub diffs. It does a little behind-the-scenes to help load this by default on PR pages too.
 
 Still allows for disabling the whitespace function if you choose.
+
+![alt text](image.png)

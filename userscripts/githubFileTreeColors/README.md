@@ -11,3 +11,5 @@ Colors the PR sidebar file tree to reflect each file's review state at a glance.
 Folder names in the tree follow the same rules, derived from the aggregate state of all files they contain.
 
 Works in both light and dark mode.
+
+![alt text](image.png)
