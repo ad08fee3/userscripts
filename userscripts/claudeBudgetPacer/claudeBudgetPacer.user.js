@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.3
+// @version      1.4
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -237,51 +237,143 @@
         return '$' + amount.toFixed(2);
     }
 
+    // The observer fires on nearly every SPA render, so a bail-out reason would be
+    // logged hundreds of times. Log each distinct reason at most once per interval.
+    const BAIL_LOG_INTERVAL_MS = 5000;
+    const lastBailLogAt = {};
+
+    // Log why injection stopped, then return false so callers can `return bail(...)`.
+    function bail(reason, details) {
+        const now = Date.now();
+        if (lastBailLogAt[reason] && now - lastBailLogAt[reason] < BAIL_LOG_INTERVAL_MS) return false;
+        lastBailLogAt[reason] = now;
+        console.log('[claudeBudgetPacer] stopped: ' + reason, details || '');
+        return false;
+    }
+
+    // Compact description of an element for bail-out logs: enough to compare against
+    // the selectors above without dumping the whole subtree.
+    function describe(el) {
+        if (!el) return null;
+        return {
+            tag: el.tagName,
+            className: typeof el.className === 'string' ? el.className : String(el.className),
+            childCount: el.children.length,
+            text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+        };
+    }
+
     // Find and inject progress bars into the usage limits section
     function injectProgressBars() {
         // Find the section containing "Your usage limits"
         const headings = Array.from(document.querySelectorAll('h3'));
         const usageLimitHeading = headings.find(h => h.textContent.includes('Your usage limits'));
-        if (!usageLimitHeading) return;
+        if (!usageLimitHeading) {
+            return bail('no h3 containing "Your usage limits"', {
+                path: location.pathname,
+                h3Count: headings.length,
+                h3Texts: headings.map(h => h.textContent.trim().slice(0, 60)),
+                headingTexts: Array.from(document.querySelectorAll('h1,h2,h3,h4'))
+                    .map(h => h.tagName + ': ' + h.textContent.trim().slice(0, 60)),
+                pageMentionsUsageLimits: document.body.textContent.includes('Your usage limits')
+            });
+        }
 
         // Walk up to the enclosing section
         let section = usageLimitHeading.closest('section');
-        if (!section) return;
+        if (!section) {
+            return bail('heading has no ancestor <section>', {
+                heading: describe(usageLimitHeading),
+                ancestors: (function() {
+                    const chain = [];
+                    let el = usageLimitHeading.parentElement;
+                    while (el && chain.length < 6) {
+                        chain.push(el.tagName + '.' + (typeof el.className === 'string' ? el.className : ''));
+                        el = el.parentElement;
+                    }
+                    return chain;
+                })()
+            });
+        }
 
         // Check if we've already injected (prevent double-injection on re-renders)
         if (section.querySelector('[data-usage-month-progress]')) return;
 
-        // Find the main content div (divide-y class)
-        const contentDiv = section.querySelector('[class*="divide-y"]');
-        if (!contentDiv) return;
-
-        // Find the spend row (first flex flex-col gap-3 div within contentDiv)
-        const spendRow = Array.from(contentDiv.children).find(el =>
-            el.classList.contains('flex') && el.classList.contains('flex-col')
+        // Find the spend row by what it contains rather than by the class of its
+        // wrapper, which the app has renamed before (divide-y -> settings-group-dividers).
+        // The row is the outermost flex column holding both the "spent" text and the meter.
+        const spendRow = Array.from(section.querySelectorAll('div')).find(el =>
+            el.classList.contains('flex') &&
+            el.classList.contains('flex-col') &&
+            el.textContent.includes('spent') &&
+            el.querySelector('[data-cds="Meter"]')
         );
-        if (!spendRow) return;
+        if (!spendRow) {
+            return bail('no flex-col row containing both "spent" and a Meter', {
+                section: describe(section),
+                sectionMentionsSpent: section.textContent.includes('spent'),
+                meterCount: section.querySelectorAll('[data-cds="Meter"]').length,
+                flexColClasses: Array.from(section.querySelectorAll('div'))
+                    .filter(el => el.classList.contains('flex') && el.classList.contains('flex-col'))
+                    .map(el => el.className)
+            });
+        }
 
         // Find the spend amount text div
         const spendAmountDiv = Array.from(spendRow.querySelectorAll('div')).find(
             el => el.textContent.includes('spent')
         );
-        if (!spendAmountDiv) return;
+        if (!spendAmountDiv) {
+            return bail('no div containing "spent" in the spend row', {
+                spendRow: describe(spendRow),
+                divTexts: Array.from(spendRow.querySelectorAll('div'))
+                    .map(el => el.textContent.replace(/\s+/g, ' ').trim().slice(0, 80))
+                    .filter(Boolean)
+                    .slice(0, 20)
+            });
+        }
 
         // Find the reset text and left container
         const leftContainer = spendAmountDiv.closest('[class*="md:w-80"]');
-        if (!leftContainer) return;
+        if (!leftContainer) {
+            return bail('spend amount has no [class*="md:w-80"] ancestor', {
+                spendAmountDiv: describe(spendAmountDiv),
+                ancestorClasses: (function() {
+                    const chain = [];
+                    let el = spendAmountDiv.parentElement;
+                    while (el && el !== spendRow.parentElement && chain.length < 6) {
+                        chain.push(el.className);
+                        el = el.parentElement;
+                    }
+                    return chain;
+                })()
+            });
+        }
 
         const resetTextDiv = Array.from(leftContainer.querySelectorAll('div')).find(
             el => el.textContent.includes('Resets')
         );
-        if (!resetTextDiv) return;
+        if (!resetTextDiv) {
+            return bail('no div containing "Resets" in the left container', {
+                leftContainer: describe(leftContainer),
+                sectionMentionsResets: section.textContent.includes('Resets'),
+                sectionResetSnippet: (section.textContent.match(/Resets[^\n]{0,60}/) || [null])[0]
+            });
+        }
 
         const resetText = resetTextDiv.textContent;
         const spendText = spendAmountDiv.textContent;
 
         const amounts = parseSpendAmounts(spendText);
         const resetDate = parseResetDate(resetText);
-        if (!amounts || !resetDate) return;
+        if (!amounts || !resetDate) {
+            return bail('could not parse the spend or reset text', {
+                spendText: spendText.replace(/\s+/g, ' ').trim().slice(0, 200),
+                resetText: resetText.replace(/\s+/g, ' ').trim().slice(0, 200),
+                parsedAmounts: amounts,
+                parsedResetDate: resetDate ? resetDate.toString() : null
+            });
+        }
 
         const now = getLocalNow();
         const windowStart = resolveWindowStart(resetDate, now);
@@ -319,11 +411,26 @@
 
         // Find the existing meter in the spend row
         const existingMeter = spendRow.querySelector('[data-cds="Meter"]');
-        if (!existingMeter) return;
+        if (!existingMeter) {
+            return bail('no [data-cds="Meter"] in the spend row', {
+                spendRow: describe(spendRow),
+                dataCdsValuesInSection: Array.from(section.querySelectorAll('[data-cds]'))
+                    .map(el => el.getAttribute('data-cds')),
+                meterRolesInSection: section.querySelectorAll('[role="meter"]').length,
+                progressbarRolesInSection: section.querySelectorAll('[role="progressbar"]').length
+            });
+        }
 
         // Find the percent label span (the one showing "25% used")
         const percentLabelSpan = spendRow.querySelector('span[class*="text-footnote"][class*="text-secondary"]');
-        if (!percentLabelSpan) return;
+        if (!percentLabelSpan) {
+            return bail('no percent label span (text-footnote + text-secondary) in the spend row', {
+                spanClasses: Array.from(spendRow.querySelectorAll('span')).map(el => ({
+                    className: el.className,
+                    text: el.textContent.trim().slice(0, 40)
+                }))
+            });
+        }
 
         // Clone the entire spend row to create the month progress row
         const monthProgressRow = spendRow.cloneNode(true);
@@ -331,6 +438,9 @@
 
         // Update the left side of the month progress row
         const monthLeftContent = monthProgressRow.querySelector('[class*="md:w-80"]');
+        if (!monthLeftContent) {
+            bail('cloned row has no [class*="md:w-80"] left content; labels will be wrong');
+        }
         if (monthLeftContent) {
             const titleDiv = monthLeftContent.querySelector('[class*="text-body"]');
             if (titleDiv) {
@@ -347,8 +457,18 @@
         if (monthMeter) {
             // Update the inner fill bar transform
             const fillBar = monthMeter.querySelector('[role="meter"]');
+            if (!fillBar) {
+                bail('cloned meter has no [role="meter"] fill bar; bar will not reflect progress', {
+                    monthMeterHtml: monthMeter.outerHTML.slice(0, 500)
+                });
+            }
             if (fillBar) {
                 const innerDiv = fillBar.querySelector('div');
+                if (!innerDiv) {
+                    bail('fill bar has no inner div to transform', {
+                        fillBarHtml: fillBar.outerHTML.slice(0, 500)
+                    });
+                }
                 if (innerDiv) {
                     // Use the same transform calculation as the original component
                     innerDiv.style.transform = `translateX(calc(var(--_meter-dir, -1) * (100% - min(100%, max(${monthProgressPercent}%, 8px)))))`;
@@ -377,6 +497,9 @@
             budgetDiv.textContent = 'Budget: ' + formatCurrency(budgetPerBusinessDay) + ' / day';
             leftContainer.appendChild(budgetDiv);
         }
+
+        console.log('[claudeBudgetPacer] injected month progress row');
+        return true;
     }
 
     // Set up mutation observer to handle SPA re-renders
@@ -403,6 +526,15 @@
             console.error('[claudeBudgetPacer] Error on initial injection:', e);
         }
     }
+
+    // Manual entry point for debugging: run one injection attempt with the
+    // throttle cleared, so the current bail-out reason always prints.
+    window.claudeBudgetPacerDebug = function() {
+        Object.keys(lastBailLogAt).forEach(key => delete lastBailLogAt[key]);
+        const existing = document.querySelector('[data-usage-month-progress]');
+        if (existing) existing.remove();
+        return injectProgressBars();
+    };
 
     // Start the script
     if (document.readyState === 'loading') {
