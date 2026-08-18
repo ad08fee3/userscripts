@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         autoCloseZoom
-// @version      1.0
+// @version      1.1
 // @description  Automatically closes Zoom meeting launch tabs once the app launches.
 // @match        https://*.zoom.us/j/*
 // @match        https://*.zoom.us/wc/*
+// @match        https://*.zoom.us/s/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/zoom/autoCloseZoom.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/zoom/autoCloseZoom.user.js
 // @grant        GM_getValue
