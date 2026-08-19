@@ -16,7 +16,8 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [githubCollapseJunk](userscripts/githubCollapseJunk/README.md) | Automatically collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages. |
 | [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Hides whitespace changes in GitHub diffs by default, while still letting you opt back in. |
 | [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
-| [instagramFixer](userscripts/instagramFixer/README.md) | Closes the stupid "pLeAsE lOg iN" modal and unmutes Instagram reels automatically. |
+| [hideSignInWithGoogle](userscripts/hideSignInWithGoogle/README.md) | Closes the stupid _"sIgN iN wItH gOoGlE?"_ pop-up that happens on every site. |
+| [instagramFixer](userscripts/instagramFixer/README.md) | Closes the stupid _"pLeAsE lOg iN"_ modal and unmutes Instagram reels automatically. |
 | [oktaAutoLogin](userscripts/oktaAutoLogin/README.md) | Automatically submits the Okta login form if your username is pre-filled. Reduces a few clicks from the  login process. |
 | [oktaBackgroundLogin](userscripts/oktaBackgroundLogin/README.md) | Allows Okta login to proceed in background tabs, instead of waiting for the tab to focus. |
 | [redditCollapseAutomod](userscripts/redditCollapseAutomod/README.md) | Collapses the annoying pinned comment that seems to be at the top of every thread nowadays. |
