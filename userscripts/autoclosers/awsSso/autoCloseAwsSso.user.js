@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         autoCloseAwsSso
-// @version      1.2
+// @version      1.3
 // @description  Automatically closes AWS SSO tabs after login.
-// @match        http://127.0.0.1/*
+// @include      /^http:\/\/127\.0\.0\.1:\d+\/.*$/
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/awsSso/autoCloseAwsSso.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/awsSso/autoCloseAwsSso.user.js
 // @grant        GM_getValue
