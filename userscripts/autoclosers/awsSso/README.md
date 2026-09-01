@@ -1,6 +1,6 @@
 # autoCloseAwsSso
 
-[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoCloseAwsSso/autoCloseAwsSso.user.js)
+[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/awsSso/autoCloseAwsSso.user.js)
 
 Automatically closes the AWS SSO tab after credentials have been shared.
 

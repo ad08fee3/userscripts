@@ -1,6 +1,6 @@
 # autoCloseSlack
 
-[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoCloseSlack/autoCloseSlack.user.js)
+[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/slack/autoCloseSlack.user.js)
 
 Automatically closes Slack redirect pages once the app launches.
 

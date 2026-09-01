@@ -1,6 +1,6 @@
 # autoCloseZoom
 
-[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoCloseZoom/autoCloseZoom.user.js)
+[Install](https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/autoclosers/zoom/autoCloseZoom.user.js)
 
 Automatically closes the Zoom meeting launch tab once the app launches.
 
