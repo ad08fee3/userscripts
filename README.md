@@ -8,6 +8,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 
 | Script | Description |
 | --- | --- |
+| [amazonUrlSimplifier](userscripts/amazonUrlSimplifier/README.md) | Cuts the trackers and unnecessary cruft from Amazon URLs for easier sharing. |
 | [claudeBudgetPacer](userscripts/claudeBudgetPacer/README.md) | Shows spending progress relative to the billing month on Claude's usage page. |
 | [githubAutoSso](userscripts/githubAutoSso/README.md) | Automatically completes GitHub's SSO re-auth banner in a background tab and closes it when done. |
 | [githubSsoAutoContinue](userscripts/githubSsoAutoContinue/README.md) | Automatically clicks Continue on GitHub's organization single sign-on page. |
