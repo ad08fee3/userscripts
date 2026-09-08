@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.8
+// @version      1.9
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -114,6 +114,7 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'apptest directory', displayName: 'Test', classify: (fileMeta) => /\/apptest\//.test(fileMeta.path) },
         { tier: 1, name: 'Mocks', displayName: 'Mock', classify: (fileMeta) => /_mock\.go$/.test(fileMeta.path) },
         { tier: 1, name: 'package-lock.json', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)package-lock\.json$/.test(fileMeta.path) },
+        { tier: 1, name: 'pnpm-lock.yaml', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)pnpm-lock\.yaml$/.test(fileMeta.path) },
         { tier: 1, name: 'go.mod/go.sum', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)go\.(mod|sum|work\.sum)$/.test(fileMeta.path) },
         { tier: 1, name: 'vitest config', displayName: 'Test', classify: (fileMeta) => /(^|\/)vitest/.test(fileMeta.path) },
         { tier: 1, name: 'testutils', displayName: 'Test', classify: (fileMeta) => /(^|\/)test_?utils\.[^/]+$/i.test(fileMeta.path) },
