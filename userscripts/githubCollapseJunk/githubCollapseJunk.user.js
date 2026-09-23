@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.10
+// @version      1.11
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -103,7 +103,6 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'Binary', displayName: 'Binary file', classify: (fileMeta) => fileMeta.isBinary === true },
         { tier: 1, name: 'Test Files', displayName: 'Test', classify: (fileMeta) => {
             const testPatterns = [
-                /\/\.storybook\//,
                 /_test\.[a-z0-9]+$/i,
                 /\.spec\.(ts|tsx|js|jsx)$/,
                 /\.test\.(ts|tsx|js|jsx)$/,
@@ -111,7 +110,6 @@ if (!DEBUG_LOGGING_ENABLED) {
                 /\.test-d\.(ts|tsx|js|jsx)$/];
             return testPatterns.some(pattern => pattern.test(fileMeta.path));
         } },
-        { tier: 1, name: 'apptest directory', displayName: 'Test', classify: (fileMeta) => /\/apptest\//.test(fileMeta.path) },
         { tier: 1, name: 'Mocks', displayName: 'Mock', classify: (fileMeta) => /_mock\.go$/.test(fileMeta.path) },
         { tier: 1, name: 'package-lock.json', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)package-lock\.json$/.test(fileMeta.path) },
         { tier: 1, name: 'pnpm-lock.yaml', displayName: 'Dependency management', classify: (fileMeta) => /(^|\/)pnpm-lock\.yaml$/.test(fileMeta.path) },
@@ -119,6 +117,10 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'vitest config', displayName: 'Test', classify: (fileMeta) => /(^|\/)vitest/.test(fileMeta.path) },
         { tier: 1, name: 'testutils', displayName: 'Test', classify: (fileMeta) => /(^|\/)test_?utils\.[^/]+$/i.test(fileMeta.path) },
         { tier: 1, name: 'SVG', displayName: 'Image', classify: (fileMeta) => /\.svg$/.test(fileMeta.path) },
+        { tier: 1, name: 'Test directory', displayName: 'Test', classify: (fileMeta) => {
+            const testDirNames = ['playwright', 'testdata', 'apptest', '.storybook'];
+            return testDirNames.some(dir => fileMeta.path.includes(`/${dir}/`) || fileMeta.path.startsWith(`${dir}/`));
+        } },
         // Tier 2: rendered diff-body text, reached only when Tier 1 found no
         // match. Covers files diffContents is silent about, like a generated
         // file GitHub renders a "not rendered by default" placeholder for.
