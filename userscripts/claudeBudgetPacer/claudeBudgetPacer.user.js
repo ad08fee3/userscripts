@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.4
+// @version      1.5
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -126,9 +126,9 @@
         return (limitAmount - spentAmount) / remainingBusinessHours;
     }
 
-    // Calculate recommended spend per business day to hit limit
     function getBudgetPerBusinessDay(spentAmount, limitAmount, now, resetDate) {
-        return getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate) * HOURS_PER_BUSINESS_DAY;
+        const paced = getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate) * HOURS_PER_BUSINESS_DAY;
+        return Math.min(paced, limitAmount - spentAmount);
     }
 
     // Parse reset date from text like "Resets Fri, Jul 31, 5:00 PM PDT"
