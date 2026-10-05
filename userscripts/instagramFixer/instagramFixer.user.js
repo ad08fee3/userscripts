@@ -1,10 +1,8 @@
 // ==UserScript==
-// @name         Instagram Reels: - Close Modal and Unmute
-// @version      1.2
+// @name         Instagram Fixer
+// @version      1.3
 // @description  Makes instagram usable my auto-closing the naggy modals and unmuting reels
-// @match        https://www.instagram.com/reel/*
-// @match        https://www.instagram.com/*/reel/*
-// @match        https://www.instagram.com/*/p/*
+// @match        https://www.instagram.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/instagramFixer/instagramFixer.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/instagramFixer/instagramFixer.user.js
 // @grant        none
