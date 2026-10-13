@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.12
+// @version      1.13
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -23,10 +23,10 @@ if (!DEBUG_LOGGING_ENABLED) {
     // API and will change without warning, so keep them collected here as the
     // single place to update when the script breaks after a GitHub front-end change.
     const SEL = {
-        diffHeader: '[class*="DiffFileHeader-module__diff-file-header__"]',
+        diffHeader: '[class*="diff-file-header__"]',
         diffBody: '.border.position-relative.rounded-bottom-2',
         collapseButtonChevron: 'button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right',
-        toolbarSubmitButton: '.ReviewMenuButton-module__ReviewMenuButton__eXO8O',
+        toolbarSubmitButton: '[class*="ReviewMenuButton__"]',
         // Sidebar file tree (present on the PR files/changes page alongside the diff
         // list itself), used to auto-collapse folders whose files are all junk/viewed.
         fileTree: '#pr-file-tree',
@@ -43,13 +43,14 @@ if (!DEBUG_LOGGING_ENABLED) {
         // The PR header's own +N/-N diffstat (e.g. "+859"/"-5", plus a
         // visually-hidden "Lines changed: 859 additions & 5 deletions" span
         // for screen readers) - rewritten to a junk-excluded total.
-        prHeaderWrapper: '[class*="PullRequestHeader-module__rightContentWrapper__"]',
-        prHeaderAdditions: '[class*="PullRequestHeader-module__rightContentWrapper__"] .fgColor-success',
-        prHeaderDeletions: '[class*="PullRequestHeader-module__rightContentWrapper__"] .fgColor-danger',
-        prHeaderSrOnly: '[class*="PullRequestHeader-module__rightContentWrapper__"] .sr-only',
-    };
-    const CLASS = {
-        collapsed: 'DiffFileHeader-module__collapsed__',
+        prHeaderWrapper: '[class*="rightContentWrapper__"]',
+        prHeaderAdditions: '[class*="rightContentWrapper__"] .fgColor-success',
+        prHeaderDeletions: '[class*="rightContentWrapper__"] .fgColor-danger',
+        prHeaderSrOnly: '[class*="rightContentWrapper__"] .sr-only',
+        // The header's collapse chevron points right while the file is collapsed.
+        // Used instead of a collapsed CSS-module class, whose hashed name GitHub
+        // reships without warning.
+        collapsedChevron: 'button[aria-labelledby] svg.octicon-chevron-right',
     };
     const HANDLED_ATTR = 'data-collapse-junk-handled';
     const LINE_STATS_TOOLTIP_HANDLED_ATTR = 'data-collapse-junk-tooltip-handled';
@@ -464,6 +465,104 @@ if (!DEBUG_LOGGING_ENABLED) {
         wrapper.addEventListener('focusout', hideLineStatsTooltip);
     }
 
+    // Snapshot of every GitHub DOM/JSON dependency this script has, logged once
+    // per pathname when DEBUG_LOGGING_ENABLED is on. Meant to be copied out of
+    // the console wholesale when a GitHub front-end change breaks the script, to
+    // show which assumption stopped holding.
+    const selectorHealthLoggedFor = new Set();
+
+    function logSelectorHealth(reason) {
+        if (!DEBUG_LOGGING_ENABLED) return;
+        const path = window.location.pathname;
+        if (selectorHealthLoggedFor.has(path)) return;
+        selectorHealthLoggedFor.add(path);
+
+        const report = { reason, path, isDiffPage: isDiffPage(), registryFiles: files.size };
+
+        // Embedded JSON: which payload keys exist, so a renamed route is visible.
+        const scripts = document.querySelectorAll('script[type="application/json"]');
+        report.jsonScripts = scripts.length;
+        report.payloadKeys = [];
+        for (const script of scripts) {
+            try {
+                const data = JSON.parse(script.textContent);
+                if (data?.payload) report.payloadKeys.push(Object.keys(data.payload).join(','));
+                const route = data?.payload?.pullRequestsChangesRoute;
+                if (route) report.routeKeys = Object.keys(route).join(',');
+            } catch {
+                // Non-JSON content; irrelevant here.
+            }
+        }
+
+        report.selectorCounts = {};
+        for (const [name, selector] of Object.entries(SEL)) {
+            try {
+                report.selectorCounts[name] = document.querySelectorAll(selector).length;
+            } catch (err) {
+                report.selectorCounts[name] = `invalid: ${err.message}`;
+            }
+        }
+
+        const diffEntries = document.querySelectorAll('[id^="diff-"]');
+        report.diffIdElements = diffEntries.length;
+        report.sampleDiffIds = [...diffEntries].slice(0, 3).map(el => `${el.tagName.toLowerCase()}#${el.id}`);
+
+        const [firstDigest, firstFile] = files.entries().next().value ?? [];
+        if (firstDigest) {
+            const entry = getDiffEntry(firstDigest);
+            const header = getHeader(entry);
+            report.firstRegistryFile = {
+                path: firstFile.path,
+                pathDigest: firstDigest,
+                entryFound: !!entry,
+                headerFound: !!header,
+                collapseButtonFound: !!getCollapseButton(header),
+                bodyFound: !!entry?.querySelector(SEL.diffBody),
+            };
+        }
+
+        // Module class names that look like diff/file headers, to spot a rename
+        // of the diff-file-header__* module class.
+        const headerishClasses = new Set();
+        for (const el of document.querySelectorAll('[class*="header__"], [class*="DiffFile"]')) {
+            for (const c of el.classList) {
+                if (/Diff|File|collapsed/i.test(c)) headerishClasses.add(c);
+            }
+            if (headerishClasses.size > 40) break;
+        }
+        report.headerishClasses = [...headerishClasses];
+
+        // The first registry file's own entry, with the diff body stripped so
+        // the header markup fits within the slice.
+        const firstEntry = firstDigest ? getDiffEntry(firstDigest) : null;
+        if (firstEntry) {
+            const clone = firstEntry.cloneNode(true);
+            clone.querySelector(SEL.diffBody)?.replaceChildren();
+            report.firstFileEntryHtml = clone.outerHTML.slice(0, 4000);
+        }
+
+        // Class chain from the collapse chevron up to the entry, to find the
+        // header element and the class that toggles when collapsed.
+        const chevron = firstEntry?.querySelector(SEL.collapseButtonChevron);
+        report.chevronAncestorClasses = [];
+        for (let el = chevron; el && el !== firstEntry; el = el.parentElement) {
+            report.chevronAncestorClasses.push(`${el.tagName.toLowerCase()}.${[...el.classList].join('.')}`);
+        }
+
+        // Candidates for the review toolbar and the PR header diffstat.
+        report.reviewButtons = [...document.querySelectorAll('button')]
+            .filter(b => /submit review|review changes|finish your review/i.test(b.textContent))
+            .map(b => `${b.textContent.trim()} :: ${b.className} :: parent ${b.parentElement?.className}`);
+        report.diffstatCandidates = [...document.querySelectorAll('.fgColor-success, .fgColor-danger')]
+            .slice(0, 6)
+            .map(el => `${el.textContent.trim()} :: parent ${el.parentElement?.className} :: grandparent ${el.parentElement?.parentElement?.className}`);
+
+        // A sidebar folder's markup, for treeFolderToggle.
+        report.firstTreeFolderHtml = document.querySelector(SEL.treeFolder)?.outerHTML.slice(0, 1500) ?? null;
+
+        console.log(`${LOG_PREFIX} selector-health ${JSON.stringify(report, null, 2)}`);
+    }
+
     function getDiffEntry(pathDigest) {
         return document.getElementById(`diff-${pathDigest}`);
     }
@@ -478,7 +577,7 @@ if (!DEBUG_LOGGING_ENABLED) {
     }
 
     function isCollapsed(header) {
-        return header.className.split(' ').some(c => c.includes(CLASS.collapsed));
+        return header.querySelector(SEL.collapsedChevron) !== null;
     }
 
     // Renders the classifier's displayName (falling back to its name) as an
@@ -493,7 +592,7 @@ if (!DEBUG_LOGGING_ENABLED) {
     // raw "(UNCLASSIFIED)" label.
     function applyClassificationLabel(header, classification) {
         if (!header) return;
-        const statsWrapper = header.querySelector('div[class*="DiffFileHeader-module__hide-on-mobile__"]');
+        const statsWrapper = header.querySelector('div[class*="hide-on-mobile__"]');
         const parent = statsWrapper?.parentElement;
         if (!parent) return;
 
@@ -1008,6 +1107,7 @@ if (!DEBUG_LOGGING_ENABLED) {
                 }
                 if (files.size === 0) {
                     warnPhase('(page)', 'registry', 'still no files after fetch, giving up for this navigation');
+                    logSelectorHealth('empty registry after fetch fallback');
                     fetchFallbackFailedFor = path;
                     return;
                 }
@@ -1018,6 +1118,9 @@ if (!DEBUG_LOGGING_ENABLED) {
             runTier1();
             reconcile();
             watchViewedFilesForOpen();
+            // Deferred so lazily-mounted diff headers have a chance to render
+            // before we count them.
+            setTimeout(() => logSelectorHealth('run complete'), 3000);
             logPhase('(page)', 'run', 'complete');
         } finally {
             running = false;
@@ -1066,6 +1169,8 @@ if (!DEBUG_LOGGING_ENABLED) {
         const pathChangedSinceLastSeen = path !== lastSeenPath;
         lastSeenPath = path;
         if (!isDiffPage()) {
+            // A PR URL that isDiffPage() rejects means GitHub changed its routes.
+            if (/\/pull\/\d+\//.test(path)) logSelectorHealth('PR page not recognized as a diff page');
             logPhase('(page)', 'onPageReady', 'not a diff page, ignoring');
             return;
         }

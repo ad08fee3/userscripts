@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.6
+// @version      1.7
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -25,7 +25,7 @@
     const diffFileHeaderSelectors = [
         // File diff headers (new React diff UI; class carries a build hash)
         {
-            selector: '[class*="DiffFileHeader-module__diff-file-header__"]',
+            selector: '[class*="diff-file-header__"]',
             getButton: (header) => {
                 const chevronButton = header.querySelector('button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right');
                 return chevronButton ? chevronButton.closest('button') : null;
@@ -41,20 +41,22 @@
         },
     ];
 
-    const inlineCommentHandler = {
-        // Inline comment thread headers
-        selector: '.InlineReviewThread-module__ReviewThreadContainer__iFcNZ',
+    // Inline and file-level ("Comment on file") comment threads. GitHub's class names
+    // no longer include the module name, so both thread kinds, and the individual
+    // comments nested inside them, share the `ReviewThreadContainer__<hash>` class.
+    // Only the outermost container is handled: an inner one would find the same
+    // chevron, and a click bubbling through both listeners would toggle it twice.
+    // File-level threads have the chevron as a direct child of the container (scoped
+    // to avoid picking up buttons inside the expanded comment body); inline threads
+    // mark theirs with data-is-first-collapse-button.
+    const REVIEW_THREAD_SELECTOR = '[class*="ReviewThreadContainer__"]';
+    const commentThreadHandler = {
+        selector: REVIEW_THREAD_SELECTOR,
         getButton: (header) => {
-            return header.querySelector('button[data-is-first-collapse-button="true"]');
+            if (header.parentElement?.closest(REVIEW_THREAD_SELECTOR)) return null;
+            return header.querySelector(':scope > button[data-component="IconButton"]')
+                ?? header.querySelector('button[data-is-first-collapse-button="true"]');
         }
-    };
-
-    // File-level comment threads ("Comment on file"), shown above the diff of the file
-    // they're attached to. The collapse chevron is a direct child of the container, so
-    // scope to that and avoid picking up buttons inside the expanded comment body.
-    const fileCommentHandler = {
-        selector: '[class*="FileReviewThread-module__ReviewThreadContainer__"]',
-        getButton: (header) => header.querySelector(':scope > button[data-component="IconButton"]')
     };
 
     // Diff file headers deferred to Refined Github when it's installed, with comment
@@ -62,8 +64,7 @@
     // since Refined Github handles click-to-collapse on all of them.
     const deferredDiffFileHandlers = [
         ...diffFileHeaderSelectors.map(h => ({ ...h, deferToRefinedGithub: true })),
-        inlineCommentHandler,
-        fileCommentHandler,
+        commentThreadHandler,
     ];
 
     // Map of URL patterns to arrays of handlers
@@ -103,16 +104,32 @@
 
         // Click handler for the entire header
         header.addEventListener('click', (e) => {
-            // If Refined Github is present and this handler defers to it, let RG handle it
-            if (deferToRefinedGithub && document.documentElement.hasAttribute('refined-github')) return;
             // Don't trigger if clicking on interactive elements
             const target = e.target;
             if (target.closest('button') || target.closest('a') || target.closest('input')) {
                 return;
             }
 
+            // Re-resolved per click, since React can replace the button element.
+            const currentButton = getButton(header) ?? button;
+
+            // If Refined Github is present and this handler defers to it, give RG
+            // the first chance to toggle. RG's own bar-click handling breaks
+            // whenever GitHub reships its diff header markup, so if the toggle
+            // button looks unchanged a couple of frames later, RG didn't act and we
+            // click it ourselves. Comparing the button's markup covers both the
+            // React UI (chevron icon swaps) and the legacy UI (aria-expanded flips).
+            if (deferToRefinedGithub && document.documentElement.hasAttribute('refined-github')) {
+                const before = currentButton.outerHTML;
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                    const after = getButton(header) ?? currentButton;
+                    if (after.outerHTML === before) after.click();
+                }));
+                return;
+            }
+
             // Click the collapse button
-            button.click();
+            currentButton.click();
         });
     }
 

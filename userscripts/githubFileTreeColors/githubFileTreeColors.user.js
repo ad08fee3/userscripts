@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.4
+// @version      1.5
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -18,13 +18,16 @@
     const SEL = {
         fileLink: 'a[href^="#diff-"]',
         folderLabel: ':scope > div [class*="PRIVATE_TreeView-item-content-text"] > span',
-        diffHeader: '[class*="DiffFileHeader-module__diff-file-header__"]',
+        diffHeader: '[class*="diff-file-header__"]',
         folderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg',
-        viewedButton: '[class*="MarkAsViewedButton-module__"]',
-    };
-    const CLASS = {
-        collapsed: 'DiffFileHeader-module__collapsed__',
-        viewed: 'MarkAsViewedButton-module__viewed__',
+        // The header's collapse chevron points right while the file is collapsed.
+        // Used instead of a collapsed CSS-module class, whose hashed name GitHub
+        // reships without warning.
+        collapsedChevron: 'button[aria-labelledby] svg.octicon-chevron-right',
+        // The mark-as-viewed toggle, labeled "Viewed" or "Not Viewed". Its
+        // aria-pressed attribute is the viewed state, so no hashed class name is
+        // needed.
+        viewedButton: 'button[aria-pressed][aria-label="Viewed"], button[aria-pressed][aria-label="Not Viewed"]',
     };
 
     function getFolderLabel(folder) {
@@ -173,6 +176,10 @@
             const header = diffRegion.querySelector(SEL.diffHeader);
             if (!header) continue;
 
+            // The collapse chevron renders even in the lightweight virtualized
+            // header described below, so collapsed state is always readable.
+            file.collapsed = header.querySelector(SEL.collapsedChevron) !== null;
+
             // GitHub virtualizes the diff list: far-off-screen diffs render a
             // lightweight header (file name + collapse toggle) without the
             // mark-as-viewed button until they scroll near the viewport. Until
@@ -182,8 +189,7 @@
             const viewedButton = header.querySelector(SEL.viewedButton);
             if (!viewedButton) continue;
 
-            file.collapsed = header.className.split(' ').some(c => c.includes(CLASS.collapsed));
-            file.viewed = viewedButton.className.split(' ').some(c => c.includes(CLASS.viewed));
+            file.viewed = viewedButton.getAttribute('aria-pressed') === 'true';
         }
     }
 
