@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.5
+// @version      1.6
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -129,6 +129,38 @@
     function getBudgetPerBusinessDay(spentAmount, limitAmount, now, resetDate) {
         const paced = getBudgetPerBusinessHour(spentAmount, limitAmount, now, resetDate) * HOURS_PER_BUSINESS_DAY;
         return Math.min(paced, limitAmount - spentAmount);
+    }
+
+    // Linear extrapolation of the spend rate so far across the whole window.
+    // Returns null until enough business hours have elapsed for the rate to mean anything.
+    const MIN_PROJECTION_BUSINESS_HOURS = 1;
+
+    function getProjectedSpend(spentAmount, elapsedBusinessHours, totalBusinessHours) {
+        if (elapsedBusinessHours < MIN_PROJECTION_BUSINESS_HOURS) return null;
+        return (spentAmount / elapsedBusinessHours) * totalBusinessHours;
+    }
+
+    // Colour thresholds for the projection overlay, as a percent of the limit.
+    // The gradient is anchored to the full track, so the overlay's colour at its
+    // right edge is the colour of the projected percent.
+    const PROJECTION_GRADIENT = 'linear-gradient(to right, ' +
+        '#22c55e 0%, #22c55e 50%, #f59e0b 60%, #f59e0b 70%, #ef4444 80%, #ef4444 100%)';
+
+    // Draw the projected spend over the spend meter's track, clipped at the projected percent.
+    function addProjectionOverlay(meter, projectedPercent) {
+        if (meter.querySelector('[data-projection-overlay]')) return;
+        if (getComputedStyle(meter).position === 'static') {
+            meter.style.position = 'relative';
+        }
+        const clipped = Math.min(100, Math.max(0, projectedPercent));
+        const overlay = document.createElement('div');
+        overlay.setAttribute('data-projection-overlay', 'true');
+        overlay.style.cssText = 'position:absolute;top:0;bottom:0;left:0;right:0;' +
+            'pointer-events:none;opacity:0.25;border-radius:inherit;' +
+            'background:' + PROJECTION_GRADIENT + ';' +
+            'clip-path:inset(0 ' + (100 - clipped) + '% 0 0);';
+        overlay.title = 'Projected spend: ' + projectedPercent.toFixed(0) + '% of limit';
+        meter.appendChild(overlay);
     }
 
     // Parse reset date from text like "Resets Fri, Jul 31, 5:00 PM PDT"
@@ -388,6 +420,7 @@
         const remainingBusinessHours = businessHoursBetween(now, resetDate);
         const elapsedBusinessHours = totalBusinessHours - remainingBusinessHours;
         const budgetPerHour = getBudgetPerBusinessHour(amounts.spent, amounts.limit, now, resetDate);
+        const projectedSpend = getProjectedSpend(amounts.spent, elapsedBusinessHours, totalBusinessHours);
         const spentPercent = amounts.limit === 0 ? 0 : (amounts.spent / amounts.limit) * 100;
 
         console.log('[claudeBudgetPacer]', {
@@ -405,6 +438,7 @@
             monthProgressPercent: monthProgressPercent.toFixed(2) + '%',
             spentPercent: spentPercent.toFixed(2) + '%',
             paceDeltaPercent: (spentPercent - monthProgressPercent).toFixed(2) + '%',
+            projectedSpend: projectedSpend === null ? null : formatCurrency(projectedSpend),
             budgetPerHour: '$' + budgetPerHour.toFixed(2) + '/hour',
             budgetPerBusinessDay: '$' + budgetPerBusinessDay.toFixed(2) + `/business day (${HOURS_PER_BUSINESS_DAY} hours)`
         });
@@ -488,6 +522,11 @@
         // Insert the month progress row after the spend row
         spendRow.parentElement.insertBefore(monthProgressRow, spendRow.nextSibling);
 
+        // Added after cloning so the month progress meter doesn't inherit it
+        if (projectedSpend !== null && amounts.limit > 0) {
+            addProjectionOverlay(existingMeter, (projectedSpend / amounts.limit) * 100);
+        }
+
         // Add budget per business day text below the spend amount (inside left container)
         if (!leftContainer.querySelector('[data-budget-per-day]')) {
             const budgetDiv = document.createElement('div');
@@ -496,6 +535,16 @@
             budgetDiv.style.marginTop = '0.25rem';
             budgetDiv.textContent = 'Budget: ' + formatCurrency(budgetPerBusinessDay) + ' / day';
             leftContainer.appendChild(budgetDiv);
+        }
+
+        // Add projected end-of-month spend below the budget line
+        if (projectedSpend !== null && !leftContainer.querySelector('[data-projected-spend]')) {
+            const projectionDiv = document.createElement('div');
+            projectionDiv.className = 'text-footnote text-secondary';
+            projectionDiv.setAttribute('data-projected-spend', 'true');
+            projectionDiv.style.marginTop = '0.25rem';
+            projectionDiv.textContent = 'Projected: ' + formatCurrency(projectedSpend) + ' by reset';
+            leftContainer.appendChild(projectionDiv);
         }
 
         console.log('[claudeBudgetPacer] injected month progress row');
