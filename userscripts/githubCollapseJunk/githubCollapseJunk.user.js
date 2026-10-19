@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.13
+// @version      1.14
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -105,6 +105,7 @@ if (!DEBUG_LOGGING_ENABLED) {
         { tier: 1, name: 'Test Files', displayName: 'Test', classify: (fileMeta) => {
             const testPatterns = [
                 /_test\.[a-z0-9]+$/i,
+                /Test\.[a-z0-9]+$/,
                 /\.spec\.(ts|tsx|js|jsx)$/,
                 /\.test\.(ts|tsx|js|jsx)$/,
                 /\.stories\.(ts|tsx|js|jsx)$/,
