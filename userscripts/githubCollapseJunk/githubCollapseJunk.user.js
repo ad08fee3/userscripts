@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.14
+// @version      1.15
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -27,9 +27,16 @@ if (!DEBUG_LOGGING_ENABLED) {
         diffBody: '.border.position-relative.rounded-bottom-2',
         collapseButtonChevron: 'button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right',
         toolbarSubmitButton: '[class*="ReviewMenuButton__"]',
+        // Commit pages have no review button; the toggle goes beside the
+        // commit's own +N/-N "files changed" summary instead.
+        commitFilesChanged: '[class*="commitFilesChangedContainer__"]',
+        // A commit page's diff entry: the region wrapping a header whose file
+        // link points at #diff-<pathDigest> (the entry itself has no such id).
+        diffEntryRegion: 'div[role="region"]',
         // Sidebar file tree (present on the PR files/changes page alongside the diff
         // list itself), used to auto-collapse folders whose files are all junk/viewed.
-        fileTree: '#pr-file-tree',
+        // A commit page's tree has no id, only its aria-label.
+        fileTree: '#pr-file-tree, ul[role="tree"][aria-label="File Tree"]',
         treeFileLink: 'a[href^="#diff-"]',
         // Deliberately matches folders in any open/closed state, not just
         // aria-expanded="true" - collapseJunkFolders must evaluate a folder
@@ -257,6 +264,26 @@ if (!DEBUG_LOGGING_ENABLED) {
         return window.location.pathname !== registryPath;
     }
 
+    // The changes route's payload key depends on the URL: the full PR diff
+    // (/pull/N/changes) embeds pullRequestsChangesRoute, while a commit range
+    // (/pull/N/changes/<sha>..<sha>) embeds pullRequestsChangesWithRangeRoute.
+    // Both have the same shape.
+    function getChangesRoute(data) {
+        return data?.payload?.pullRequestsChangesRoute ?? data?.payload?.pullRequestsChangesWithRangeRoute;
+    }
+
+    // A commit page (/commit/<sha>) embeds payload.commitRoute.diffEntryData
+    // instead: one entry per file holding both the summary and content fields,
+    // under slightly different names (status for changeType, newOid for
+    // newCommitOid). Normalized into the same two collections the PR route fills.
+    function addCommitEntries(entries, summaries, contentsByDigest) {
+        for (const entry of entries) {
+            if (!entry?.pathDigest) continue;
+            summaries.push({ ...entry, changeType: entry.status });
+            contentsByDigest.set(entry.pathDigest, { ...entry, newCommitOid: entry.newOid });
+        }
+    }
+
     // GitHub embeds the PR's file list as JSON data islands, split across two
     // arrays. diffSummaries has every file (path, pathDigest, changeType) but no
     // isBinary/isTooBig/isGenerated. diffContents has that richer metadata but
@@ -280,7 +307,13 @@ if (!DEBUG_LOGGING_ENABLED) {
             } catch {
                 continue;
             }
-            const route = data?.payload?.pullRequestsChangesRoute;
+            const commitRoute = data?.payload?.commitRoute;
+            if (Array.isArray(commitRoute?.diffEntryData)) {
+                routesFound++;
+                addCommitEntries(commitRoute.diffEntryData, summaries, contentsByDigest);
+                continue;
+            }
+            const route = getChangesRoute(data);
             if (!route) continue;
             routesFound++;
             if (Array.isArray(route.diffSummaries)) {
@@ -366,6 +399,34 @@ if (!DEBUG_LOGGING_ENABLED) {
         logPhase('(page)', 'line-stat-totals', `added=${linesAdded} changed=${linesChanged} deleted=${linesDeleted}`);
     }
 
+    // The page-level "+N"/"-N" diffstat. A PR page has it in the header's
+    // rightContentWrapper; a commit page has it in the files-changed summary row,
+    // as the child whose text starts with "+N". Elements may be null (GitHub
+    // omits a zero count, and commit pages have no screen-reader summary).
+    function getHeaderStatsWrapper() {
+        const prWrapper = document.querySelector(SEL.prHeaderWrapper);
+        if (prWrapper) return prWrapper;
+        const commitRow = document.querySelector(SEL.commitFilesChanged);
+        if (!commitRow) return null;
+        // One level deeper too, since insertCommitToggleButton moves the diffstat
+        // into its own group. Document order returns the diffstat before its
+        // "+N" children.
+        return [...commitRow.querySelectorAll(':scope > *, :scope > * > *')]
+            .find(el => /^[+-]\d/.test(el.textContent.trim())) ?? null;
+    }
+
+    function getHeaderStatEls() {
+        const wrapper = getHeaderStatsWrapper();
+        if (!wrapper) return { wrapper: null, additionsEl: null, deletionsEl: null, srOnlyEl: null };
+        const leaves = [...wrapper.querySelectorAll('*')].filter(el => el.children.length === 0);
+        return {
+            wrapper,
+            additionsEl: wrapper.querySelector('.fgColor-success') ?? leaves.find(el => /^\+\d/.test(el.textContent.trim())) ?? null,
+            deletionsEl: wrapper.querySelector('.fgColor-danger') ?? leaves.find(el => /^-\d/.test(el.textContent.trim())) ?? null,
+            srOnlyEl: wrapper.querySelector('.sr-only'),
+        };
+    }
+
     // Reads the header's "+N"/"-N" text and parses out the raw counts for
     // updateHeaderLineStats()'s starting point, before this script touches those
     // elements. Returns null if the header isn't mounted yet - callers must treat
@@ -373,8 +434,7 @@ if (!DEBUG_LOGGING_ENABLED) {
     // the additions or deletions element may be missing (GitHub doesn't render
     // them when the count is 0), in which case that count is treated as 0.
     function readHeaderLineStatsBaseline() {
-        const additionsEl = document.querySelector(SEL.prHeaderAdditions);
-        const deletionsEl = document.querySelector(SEL.prHeaderDeletions);
+        const { additionsEl, deletionsEl } = getHeaderStatEls();
         if (!additionsEl && !deletionsEl) return null;
         const linesAdded = additionsEl ? parseInt(additionsEl.textContent.replace(/[^\d]/g, ''), 10) : 0;
         const linesDeleted = deletionsEl ? parseInt(deletionsEl.textContent.replace(/[^\d]/g, ''), 10) : 0;
@@ -406,9 +466,7 @@ if (!DEBUG_LOGGING_ENABLED) {
             if (file.meta.linesDeleted !== undefined) linesDeleted -= file.meta.linesDeleted;
         }
 
-        const additionsEl = document.querySelector(SEL.prHeaderAdditions);
-        const deletionsEl = document.querySelector(SEL.prHeaderDeletions);
-        const srOnlyEl = document.querySelector(SEL.prHeaderSrOnly);
+        const { additionsEl, deletionsEl, srOnlyEl } = getHeaderStatEls();
         setTextIfChanged(additionsEl, `+${linesAdded}`);
         setTextIfChanged(deletionsEl, `-${linesDeleted}`);
         setTextIfChanged(srOnlyEl, `Lines changed: ${linesAdded} additions & ${linesDeleted} deletions`);
@@ -457,7 +515,7 @@ if (!DEBUG_LOGGING_ENABLED) {
     // this wrapper on Turbo navigation to a new PR and a guard keyed to the old
     // element would silently stop firing.
     function insertLineStatsTooltipListener() {
-        const wrapper = document.querySelector(SEL.prHeaderWrapper);
+        const wrapper = getHeaderStatsWrapper();
         if (!wrapper || wrapper.hasAttribute(LINE_STATS_TOOLTIP_HANDLED_ATTR)) return;
         wrapper.setAttribute(LINE_STATS_TOOLTIP_HANDLED_ATTR, '1');
         wrapper.addEventListener('mouseenter', () => showLineStatsTooltip(wrapper));
@@ -488,7 +546,7 @@ if (!DEBUG_LOGGING_ENABLED) {
             try {
                 const data = JSON.parse(script.textContent);
                 if (data?.payload) report.payloadKeys.push(Object.keys(data.payload).join(','));
-                const route = data?.payload?.pullRequestsChangesRoute;
+                const route = getChangesRoute(data);
                 if (route) report.routeKeys = Object.keys(route).join(',');
             } catch {
                 // Non-JSON content; irrelevant here.
@@ -565,7 +623,9 @@ if (!DEBUG_LOGGING_ENABLED) {
     }
 
     function getDiffEntry(pathDigest) {
-        return document.getElementById(`diff-${pathDigest}`);
+        return document.getElementById(`diff-${pathDigest}`) ??
+            document.querySelector(`${SEL.diffHeader} a[href="#diff-${pathDigest}"]`)?.closest(SEL.diffEntryRegion) ??
+            null;
     }
 
     function getHeader(diffEntry) {
@@ -779,11 +839,16 @@ if (!DEBUG_LOGGING_ENABLED) {
 
     // Walks up from a header to its diff entry and recovers the pathDigest from
     // the entry's id, mirroring getDiffEntry's `diff-${pathDigest}` scheme in
-    // reverse. Used by the manual-click listener to know which file a click on
+    // reverse, or from the header's own file link on commit pages, whose entries
+    // have no id. The id must be a full diff-<digest>: commit pages wrap every
+    // entry in #diff-content-parent, which a bare [id^="diff-"] match would hit
+    // first. Used by the manual-click listener to know which file a click on
     // the page actually belongs to.
     function pathDigestFromHeader(header) {
+        const digestPattern = /^#?diff-([0-9a-f]{64})$/;
         const id = header.closest('[id^="diff-"]')?.id;
-        return id ? id.slice('diff-'.length) : null;
+        const href = header.querySelector('a[href^="#diff-"]')?.getAttribute('href');
+        return id?.match(digestPattern)?.[1] ?? href?.match(digestPattern)?.[1] ?? null;
     }
 
     // The single reconciler: for every file with a mounted header, drives DOM
@@ -1048,7 +1113,10 @@ if (!DEBUG_LOGGING_ENABLED) {
 
     function insertToggleButton() {
         const submitButton = document.querySelector(SEL.toolbarSubmitButton);
-        if (!submitButton) return;
+        if (!submitButton) {
+            insertCommitToggleButton();
+            return;
+        }
         const container = submitButton.parentElement;
         if (!container || container.hasAttribute(HANDLED_ATTR)) return;
         container.setAttribute(HANDLED_ATTR, '1');
@@ -1060,6 +1128,32 @@ if (!DEBUG_LOGGING_ENABLED) {
         button.addEventListener('click', toggleJunk);
 
         container.insertBefore(button, submitButton);
+        toggleButtonEl = button;
+        updateToggleButtonLabel();
+    }
+
+    function insertCommitToggleButton() {
+        const container = document.querySelector(SEL.commitFilesChanged);
+        if (!container || container.hasAttribute(HANDLED_ATTR)) return;
+        container.setAttribute(HANDLED_ATTR, '1');
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Hide junk';
+        button.className = 'btn btn-sm';
+        button.addEventListener('click', toggleJunk);
+
+        // The button and the diffstat sit together as one group against the
+        // row's right edge, with the file count left. Appended last, since the
+        // row has other children after the diffstat.
+        const stats = getHeaderStatsWrapper();
+        const group = document.createElement('div');
+        group.className = 'd-flex flex-items-center';
+        group.style.gap = '16px';
+        group.style.marginLeft = 'auto';
+        container.append(group);
+        group.append(button);
+        if (stats) group.append(stats);
         toggleButtonEl = button;
         updateToggleButtonLabel();
     }
@@ -1129,7 +1223,8 @@ if (!DEBUG_LOGGING_ENABLED) {
     }
 
     function isDiffPage() {
-        return /\/pull\/\d+\/(files|changes)/.test(window.location.pathname);
+        const path = window.location.pathname;
+        return /\/pull\/\d+\/(files|changes)/.test(path) || /\/commit\/[0-9a-f]+/.test(path);
     }
 
     // owner/repo#number for the PR the current pathname points at, or null off a

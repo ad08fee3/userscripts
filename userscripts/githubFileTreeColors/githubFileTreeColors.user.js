@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.5
+// @version      1.6
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -17,6 +17,15 @@
     // place to update when the script breaks after a GitHub front-end change.
     const SEL = {
         fileLink: 'a[href^="#diff-"]',
+        // The PR page's sidebar tree has an id; a commit page's has only its
+        // aria-label.
+        fileTree: '#pr-file-tree, ul[role="tree"][aria-label="File Tree"]',
+        // Diff list containers, for filtering attribute mutations: the PR page's
+        // and the commit page's.
+        diffList: '[data-testid="progressive-diffs-list"], #diff-content-parent',
+        // A commit page's diff entry: the region wrapping a header whose file
+        // link points at #diff-<pathDigest> (the entry itself has no such id).
+        diffEntryRegion: 'div[role="region"]',
         folderLabel: ':scope > div [class*="PRIVATE_TreeView-item-content-text"] > span',
         diffHeader: '[class*="diff-file-header__"]',
         folderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg',
@@ -29,6 +38,16 @@
         // needed.
         viewedButton: 'button[aria-pressed][aria-label="Viewed"], button[aria-pressed][aria-label="Not Viewed"]',
     };
+
+    function getFileTree() {
+        return document.querySelector(SEL.fileTree);
+    }
+
+    function getDiffRegion(hash) {
+        return document.getElementById(hash) ??
+            document.querySelector(`${SEL.diffHeader} a[href="#${hash}"]`)?.closest(SEL.diffEntryRegion) ??
+            null;
+    }
 
     function getFolderLabel(folder) {
         return folder.querySelector(SEL.folderLabel);
@@ -139,12 +158,14 @@
         for (const [hash, state] of cachedEmbeddedStates) {
             if (!files.has(hash)) files.set(hash, state);
         }
-        document.querySelectorAll(`#pr-file-tree ${SEL.fileLink}`).forEach(link => {
+        const tree = getFileTree();
+        if (!tree) return;
+        tree.querySelectorAll(SEL.fileLink).forEach(link => {
             const hash = link.getAttribute('href').slice(1);
             if (!files.has(hash)) files.set(hash, { collapsed: false, viewed: false });
         });
 
-        document.querySelectorAll('#pr-file-tree li[role="treeitem"][aria-expanded]').forEach(folder => {
+        tree.querySelectorAll('li[role="treeitem"][aria-expanded]').forEach(folder => {
             const label = getFolderLabel(folder);
             if (!label) return;
 
@@ -171,7 +192,7 @@
 
     function updateStates() {
         for (const [hash, file] of files) {
-            const diffRegion = document.getElementById(hash);
+            const diffRegion = getDiffRegion(hash);
             if (!diffRegion) continue;
             const header = diffRegion.querySelector(SEL.diffHeader);
             if (!header) continue;
@@ -196,8 +217,9 @@
     function syncStyles() {
         const colors = getColors();
 
+        const tree = getFileTree();
         for (const [hash, file] of files) {
-            const link = document.querySelector(`#pr-file-tree a[href="#${hash}"]`);
+            const link = tree?.querySelector(`a[href="#${hash}"]`);
             if (!link) continue;
             applyStyles(link, file.collapsed, file.viewed, colors);
         }
@@ -250,8 +272,8 @@
             if (m.type === 'childList') return true;
             if (m.type === 'attributes') {
                 // Only care about class changes inside the diff list or file tree
-                const diffList = document.querySelector('[data-testid="progressive-diffs-list"]');
-                const fileTree = document.getElementById('pr-file-tree');
+                const diffList = document.querySelector(SEL.diffList);
+                const fileTree = getFileTree();
                 return (diffList?.contains(m.target) || fileTree?.contains(m.target)) ?? false;
             }
             return false;
