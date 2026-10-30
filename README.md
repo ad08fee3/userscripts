@@ -15,6 +15,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [githubFileTreeColors](userscripts/githubFileTreeColors/README.md) | Colors the PR sidebar file tree to reflect each file's collapsed and viewed state at a glance. |
 | [githubCollapsibleHeaderBars](userscripts/githubCollapsibleHeaderBars/README.md) | Allows you to click anywhere on a file header to collapse its content. Expands upon the functionality added by Refined GitHub. |
 | [githubCollapseJunk](userscripts/githubCollapseJunk/README.md) | Automatically collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages. |
+| [githubDiffWhitespace](userscripts/githubDiffWhitespace/README.md) | Makes GitHub compare pages hide whitespace changes by default. |
 | [githubWideInlineComments](userscripts/githubWideInlineComments/README.md) | Widens inline PR review comments so threads use more of the available space. |
 | [hideSignInWithGoogle](userscripts/hideSignInWithGoogle/README.md) | Closes the stupid _"sIgN iN wItH gOoGlE?"_ pop-up that happens on every site. |
 | [instagramFixer](userscripts/instagramFixer/README.md) | Closes the stupid _"pLeAsE lOg iN"_ modal and unmutes Instagram reels automatically. |
