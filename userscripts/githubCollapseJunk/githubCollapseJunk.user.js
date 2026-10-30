@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.15
-// @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR diff pages, with a toggle button to show/hide them.
+// @version      1.16
+// @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR, commit, and compare diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
 // @updateURL    https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -23,8 +23,22 @@ if (!DEBUG_LOGGING_ENABLED) {
     // API and will change without warning, so keep them collected here as the
     // single place to update when the script breaks after a GitHub front-end change.
     const SEL = {
-        diffHeader: '[class*="diff-file-header__"]',
-        diffBody: '.border.position-relative.rounded-bottom-2',
+        // The first alternative of each pair is the React diff (PR and commit
+        // pages); the second is the legacy server-rendered diff that compare
+        // pages still use.
+        diffHeader: '[class*="diff-file-header__"], .file-header',
+        diffBody: '.border.position-relative.rounded-bottom-2, .js-file-content',
+        // Legacy diff only. Its header's chevron icons are both always in the
+        // DOM (CSS shows one), so collapsed state is the button's aria-expanded,
+        // not which chevron exists.
+        legacyCollapseButton: 'button.js-details-target[aria-label="Toggle diff contents"]',
+        legacyFileEntry: 'div.file[id^="diff-"]',
+        // The right-aligned row holding the header's "..." menu.
+        legacyFileActions: '.file-actions > .d-flex',
+        // Legacy compare page's summary row ("Showing N changed files", the
+        // "No Whitespace" button, the split/unified switch); the toggle goes
+        // beside the whitespace button.
+        legacyToolbar: '#toc',
         collapseButtonChevron: 'button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right',
         toolbarSubmitButton: '[class*="ReviewMenuButton__"]',
         // Commit pages have no review button; the toggle goes beside the
@@ -328,8 +342,31 @@ if (!DEBUG_LOGGING_ENABLED) {
                 headOid = route.comparison.fullDiff.headOid;
             }
         }
+        if (routesFound === 0) {
+            headOid = addLegacyEntries(root, summaries);
+        }
         logPhase('(page)', 'route-scan', `${scripts.length} json script(s), ${routesFound} route(s), ${summaries.length} summar(y/ies)`);
         return { summaries, contentsByDigest, headOid };
+    }
+
+    // A compare page (/compare/<base>..<head>) is the legacy server-rendered
+    // diff: it embeds no route JSON, so the file list comes from each entry's
+    // own attributes. That gives only path and deleted status; the rest of the
+    // metadata the JSON routes carry (binary, generated, line counts) is left
+    // undefined, and the Tier 2 body-text classifiers cover the placeholders.
+    // The head ref after the `..`/`...` is what Tier 3 fetches blobs from.
+    function addLegacyEntries(root, summaries) {
+        for (const entry of root.querySelectorAll(SEL.legacyFileEntry)) {
+            const path = entry.dataset.tagsearchPath;
+            if (!path) continue;
+            summaries.push({
+                path,
+                pathDigest: entry.id.slice('diff-'.length),
+                changeType: entry.dataset.fileDeleted === 'true' ? 'REMOVED' : undefined,
+            });
+        }
+        const head = window.location.pathname.match(/\/compare\/.+?\.{2,3}(.+)$/)?.[1];
+        return head && decodeURIComponent(head);
     }
 
     // Fallback for when Turbo's tab-switch (main PR page -> "Files changed") never
@@ -350,40 +387,60 @@ if (!DEBUG_LOGGING_ENABLED) {
         const { summaries, contentsByDigest, headOid } = routeArrays;
         for (const summary of summaries) {
             if (!summary.pathDigest) continue;
-            const content = contentsByDigest.get(summary.pathDigest);
-            // status and changeType are the same enum, so a file missing from
-            // diffContents still gets a usable status.
-            const meta = {
-                path: summary.path,
-                status: summary.changeType,
-                isBinary: content?.isBinary ?? false,
-                isTooBig: content?.isTooBig ?? false,
-                newTreeEntry: content?.newTreeEntry,
-                newCommitOid: content?.newCommitOid ?? headOid,
-                // Left undefined (not defaulted to 0) when GitHub's JSON has no
-                // number for this file - updateHeaderLineStats must tell "changed
-                // 0 lines" apart from "we don't know", since only the former is
-                // safe to subtract from the header's baseline total.
-                linesAdded: summary.linesAdded,
-                linesChanged: summary.linesChanged,
-                linesDeleted: summary.linesDeleted,
-            };
-            const viewed = summary.markedAsViewed === true;
-            files.set(summary.pathDigest, {
-                path: summary.path,
-                classification: 'UNCLASSIFIED',
-                meta,
-                viewed,
-                tier2Deferred: false,
-                isCollapsed: undefined,
-                shouldBeCollapsed: viewed,
-                tier3Kicked: false,
-            });
-            logPhase(summary.path, 'registry', viewed ? 'viewed' : 'not viewed');
+            registerFile(summary, contentsByDigest.get(summary.pathDigest), headOid);
         }
         folderCollapseState.clear();
         headerLineStatsBaseline = null;
         logLineStatTotals();
+    }
+
+    function registerFile(summary, content, headOid) {
+        // status and changeType are the same enum, so a file missing from
+        // diffContents still gets a usable status.
+        const meta = {
+            path: summary.path,
+            status: summary.changeType,
+            isBinary: content?.isBinary ?? false,
+            isTooBig: content?.isTooBig ?? false,
+            newTreeEntry: content?.newTreeEntry,
+            newCommitOid: content?.newCommitOid ?? headOid,
+            // Left undefined (not defaulted to 0) when GitHub's JSON has no
+            // number for this file - updateHeaderLineStats must tell "changed
+            // 0 lines" apart from "we don't know", since only the former is
+            // safe to subtract from the header's baseline total.
+            linesAdded: summary.linesAdded,
+            linesChanged: summary.linesChanged,
+            linesDeleted: summary.linesDeleted,
+        };
+        const viewed = summary.markedAsViewed === true;
+        const file = {
+            path: summary.path,
+            classification: 'UNCLASSIFIED',
+            meta,
+            viewed,
+            tier2Deferred: false,
+            isCollapsed: undefined,
+            shouldBeCollapsed: viewed,
+            tier3Kicked: false,
+        };
+        files.set(summary.pathDigest, file);
+        logPhase(summary.path, 'registry', viewed ? 'viewed' : 'not viewed');
+        return file;
+    }
+
+    // A compare page streams its file entries into the DOM over the first couple
+    // of seconds after load, so the registry built from the first batch is
+    // incomplete. Called on every page mutation to register entries as they
+    // arrive. Tier 1 runs on just the new files: re-running it on an already
+    // classified file would reset its shouldBeCollapsed to the toggle's intent
+    // and undo a manual expand.
+    function registerNewLegacyFiles() {
+        const summaries = [];
+        const headOid = addLegacyEntries(document, summaries);
+        const added = summaries
+            .filter(summary => !files.has(summary.pathDigest))
+            .map(summary => registerFile(summary, undefined, headOid));
+        if (added.length > 0) runTier1(added);
     }
 
     // Diagnostic: sums linesAdded/linesChanged/linesDeleted across the registry
@@ -633,11 +690,15 @@ if (!DEBUG_LOGGING_ENABLED) {
     }
 
     function getCollapseButton(header) {
+        const legacyButton = header?.querySelector(SEL.legacyCollapseButton);
+        if (legacyButton) return legacyButton;
         const chevron = header?.querySelector(SEL.collapseButtonChevron);
         return chevron ? chevron.closest('button') : null;
     }
 
     function isCollapsed(header) {
+        const legacyButton = header.querySelector(SEL.legacyCollapseButton);
+        if (legacyButton) return legacyButton.getAttribute('aria-expanded') === 'false';
         return header.querySelector(SEL.collapsedChevron) !== null;
     }
 
@@ -654,8 +715,11 @@ if (!DEBUG_LOGGING_ENABLED) {
     function applyClassificationLabel(header, classification) {
         if (!header) return;
         const statsWrapper = header.querySelector('div[class*="hide-on-mobile__"]');
-        const parent = statsWrapper?.parentElement;
+        // A legacy header has no such wrapper; the label goes at the start of
+        // its actions row instead, just left of the "..." menu.
+        const parent = statsWrapper?.parentElement ?? header.querySelector(SEL.legacyFileActions);
         if (!parent) return;
+        const insertionPoint = statsWrapper ?? parent.firstElementChild;
 
         let label = parent.querySelector(`.${CLASSIFICATION_LABEL_CLASS}`);
         if (!classification || classification === 'normal' || classification === 'UNCLASSIFIED') {
@@ -672,7 +736,8 @@ if (!DEBUG_LOGGING_ENABLED) {
             label.style.fontStyle = 'italic';
             label.style.opacity = '0.7';
             label.style.marginRight = '8px';
-            parent.insertBefore(label, statsWrapper);
+            if (!statsWrapper) label.style.alignSelf = 'center';
+            parent.insertBefore(label, insertionPoint);
         }
         label.textContent = text;
     }
@@ -702,8 +767,8 @@ if (!DEBUG_LOGGING_ENABLED) {
     // tier-1 junk match just records the classification, and a viewed file with no
     // tier-1 match is marked deferred (its tier-2/3 pass waits until the user
     // opens it - no point reading DOM text from a hidden body).
-    function runTier1() {
-        for (const file of files.values()) {
+    function runTier1(targets = files.values()) {
+        for (const file of targets) {
             const match = tier1Classifiers.find(c => c.classify(file.meta));
             if (match) {
                 applyClassification(file, match.name);
@@ -1114,7 +1179,8 @@ if (!DEBUG_LOGGING_ENABLED) {
     function insertToggleButton() {
         const submitButton = document.querySelector(SEL.toolbarSubmitButton);
         if (!submitButton) {
-            insertCommitToggleButton();
+            if (document.querySelector(SEL.commitFilesChanged)) insertCommitToggleButton();
+            else insertLegacyToggleButton();
             return;
         }
         const container = submitButton.parentElement;
@@ -1158,6 +1224,32 @@ if (!DEBUG_LOGGING_ENABLED) {
         updateToggleButtonLabel();
     }
 
+    function insertLegacyToggleButton() {
+        const container = document.querySelector(SEL.legacyToolbar);
+        if (!container) return;
+
+        if (!toggleButtonEl?.isConnected) {
+            container.setAttribute(HANDLED_ATTR, '1');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Hide junk';
+            button.className = 'btn btn-sm float-right mr-3';
+            button.addEventListener('click', toggleJunk);
+            container.prepend(button);
+            toggleButtonEl = button;
+            updateToggleButtonLabel();
+        }
+
+        // The toolbar's controls are right-floated, so a sibling placed after
+        // the whitespace button lands just left of it. That button is added to
+        // the toolbar after the toolbar itself appears, so this runs on every
+        // pass rather than once at creation.
+        const whitespaceButton = container.querySelector(':scope > a.btn');
+        if (whitespaceButton && whitespaceButton.nextElementSibling !== toggleButtonEl) {
+            whitespaceButton.after(toggleButtonEl);
+        }
+    }
+
     let running = false;
 
     // Path we've already tried the fetch fallback for and come up empty on -
@@ -1180,6 +1272,10 @@ if (!DEBUG_LOGGING_ENABLED) {
             buildRegistry();
             logPhase('(page)', 'run', `registry built, ${files.size} file(s)`);
             if (files.size === 0) {
+                // Nothing has streamed in yet; the next page mutation retries.
+                // Fetching the page would find the same empty list and latch
+                // fetchFallbackFailedFor, blocking the retries.
+                if (isLegacyDiffPage()) return;
                 if (fetchFallbackFailedFor === path) {
                     logPhase('(page)', 'registry', 'fetch fallback already failed for this path, will retry on next navigation');
                     return;
@@ -1222,9 +1318,13 @@ if (!DEBUG_LOGGING_ENABLED) {
         }
     }
 
+    function isLegacyDiffPage() {
+        return /\/compare\/.+?\.{2,3}.+/.test(window.location.pathname);
+    }
+
     function isDiffPage() {
         const path = window.location.pathname;
-        return /\/pull\/\d+\/(files|changes)/.test(path) || /\/commit\/[0-9a-f]+/.test(path);
+        return /\/pull\/\d+\/(files|changes)/.test(path) || /\/commit\/[0-9a-f]+/.test(path) || isLegacyDiffPage();
     }
 
     // owner/repo#number for the PR the current pathname points at, or null off a
@@ -1299,6 +1399,7 @@ if (!DEBUG_LOGGING_ENABLED) {
         if (pathChangedSinceLastSeen) {
             folderCollapseState.clear();
         }
+        if (isLegacyDiffPage()) registerNewLegacyFiles();
         insertToggleButton();
         reconcile();
     }
