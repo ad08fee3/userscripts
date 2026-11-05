@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubFileTreeColors
-// @version      1.6
+// @version      1.7
 // @description  In the GitHub PR sidebar file tree, grays out and italicizes file names whose diffs are collapsed in the main view.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubFileTreeColors/githubFileTreeColors.user.js
@@ -43,9 +43,17 @@
         return document.querySelector(SEL.fileTree);
     }
 
+    // Builds "descendant inside any of ancestors". Any SEL value may be a
+    // selector list, and plain concatenation ("A, B a[...]") only qualifies the
+    // last alternative, leaving A matching on its own. :is() applies the
+    // descendant to every alternative.
+    function within(ancestors, descendant) {
+        return `:is(${ancestors}) ${descendant}`;
+    }
+
     function getDiffRegion(hash) {
         return document.getElementById(hash) ??
-            document.querySelector(`${SEL.diffHeader} a[href="#${hash}"]`)?.closest(SEL.diffEntryRegion) ??
+            document.querySelector(within(SEL.diffHeader, `a[href="#${hash}"]`))?.closest(SEL.diffEntryRegion) ??
             null;
     }
 

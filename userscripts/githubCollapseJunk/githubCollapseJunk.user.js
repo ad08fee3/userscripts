@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.16
+// @version      1.17
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR, commit, and compare diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -679,9 +679,17 @@ if (!DEBUG_LOGGING_ENABLED) {
         console.log(`${LOG_PREFIX} selector-health ${JSON.stringify(report, null, 2)}`);
     }
 
+    // Builds "descendant inside any of ancestors". Any SEL value may be a
+    // selector list, and plain concatenation ("A, B a[...]") only qualifies the
+    // last alternative, leaving A matching on its own. :is() applies the
+    // descendant to every alternative.
+    function within(ancestors, descendant) {
+        return `:is(${ancestors}) ${descendant}`;
+    }
+
     function getDiffEntry(pathDigest) {
         return document.getElementById(`diff-${pathDigest}`) ??
-            document.querySelector(`${SEL.diffHeader} a[href="#diff-${pathDigest}"]`)?.closest(SEL.diffEntryRegion) ??
+            document.querySelector(within(SEL.diffHeader, `a[href="#diff-${pathDigest}"]`))?.closest(SEL.diffEntryRegion) ??
             null;
     }
 
