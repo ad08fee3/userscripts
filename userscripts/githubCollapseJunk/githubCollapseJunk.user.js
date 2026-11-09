@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.17
+// @version      1.18
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR, commit, and compare diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -39,6 +39,10 @@ if (!DEBUG_LOGGING_ENABLED) {
         // "No Whitespace" button, the split/unified switch); the toggle goes
         // beside the whitespace button.
         legacyToolbar: '#toc',
+        // Legacy PR /files page's "Review changes" dropdown; the toggle goes
+        // just left of it, in the same review-tools row.
+        legacyReviewTools: '.pr-review-tools > .js-reviews-container',
+        legacyViewedCheckbox: 'input.js-reviewed-checkbox',
         collapseButtonChevron: 'button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right',
         toolbarSubmitButton: '[class*="ReviewMenuButton__"]',
         // Commit pages have no review button; the toggle goes beside the
@@ -49,8 +53,9 @@ if (!DEBUG_LOGGING_ENABLED) {
         diffEntryRegion: 'div[role="region"]',
         // Sidebar file tree (present on the PR files/changes page alongside the diff
         // list itself), used to auto-collapse folders whose files are all junk/viewed.
-        // A commit page's tree has no id, only its aria-label.
-        fileTree: '#pr-file-tree, ul[role="tree"][aria-label="File Tree"]',
+        // A commit page's tree has no id, only its aria-label. The legacy PR
+        // /files page's tree is a <file-tree> element.
+        fileTree: '#pr-file-tree, ul[role="tree"][aria-label="File Tree"], file-tree',
         treeFileLink: 'a[href^="#diff-"]',
         // Deliberately matches folders in any open/closed state, not just
         // aria-expanded="true" - collapseJunkFolders must evaluate a folder
@@ -59,8 +64,12 @@ if (!DEBUG_LOGGING_ENABLED) {
         // filter meant a folder collapsed by the user (or nested inside one)
         // was invisible to this query until reopened, at which point it looked
         // brand new and got immediately re-collapsed by our own script.
-        treeFolder: 'li[role="treeitem"][aria-expanded]',
-        treeFolderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg',
+        // The legacy tree puts aria-expanded on the folder's inner button
+        // instead, and marks the folder itself with data-tree-entry-type.
+        treeFolder: 'li[role="treeitem"][aria-expanded], li[role="treeitem"][data-tree-entry-type="directory"]',
+        // In the legacy tree, the folder's whole label row is the toggle button.
+        treeFolderToggle: ':scope > div [class*="PRIVATE_TreeView-item-toggle"] svg, :scope > button.ActionList-content',
+        legacyTreeFolderLabel: ':scope > button .ActionList-item-label',
         // The PR header's own +N/-N diffstat (e.g. "+859"/"-5", plus a
         // visually-hidden "Lines changed: 859 additions & 5 deletions" span
         // for screen readers) - rewritten to a junk-excluded total.
@@ -363,6 +372,8 @@ if (!DEBUG_LOGGING_ENABLED) {
                 path,
                 pathDigest: entry.id.slice('diff-'.length),
                 changeType: entry.dataset.fileDeleted === 'true' ? 'REMOVED' : undefined,
+                // Only PR /files pages have the checkbox; compare pages don't.
+                markedAsViewed: entry.querySelector(SEL.legacyViewedCheckbox)?.checked === true,
             });
         }
         const head = window.location.pathname.match(/\/compare\/.+?\.{2,3}(.+)$/)?.[1];
@@ -1041,6 +1052,22 @@ if (!DEBUG_LOGGING_ENABLED) {
     // (and so this function) after each click's own DOM mutation lands, so the
     // remaining eligible folders still all collapse - just one real frame apart
     // instead of piled into one synchronous burst.
+    // The React tree derives each folder's id from its path. The legacy tree's
+    // folders have no id, so the chain of folder labels down to this one (each
+    // label is a path segment, possibly several joined with "/") stands in.
+    function treeFolderKey(folder) {
+        if (folder.id) return folder.id;
+        const labels = [];
+        for (let f = folder; f; f = f.parentElement?.closest(SEL.treeFolder)) {
+            // Strips the "/" githubFileTreeColors appends, so the key doesn't
+            // change when that script styles the label.
+            const label = f.querySelector(SEL.legacyTreeFolderLabel)?.textContent.replace(/\/\s*$/, '').trim();
+            if (!label) return '';
+            labels.unshift(label);
+        }
+        return labels.join('/');
+    }
+
     function collapseJunkFolders() {
         const tree = document.querySelector(SEL.fileTree);
         if (!tree) {
@@ -1064,7 +1091,7 @@ if (!DEBUG_LOGGING_ENABLED) {
         const isDescendantOfCollapsed = (folder) => {
             let ancestor = folder.parentElement?.closest(SEL.treeFolder);
             while (ancestor) {
-                if (folderCollapseState.get(ancestor.id) === 'collapsed') return true;
+                if (folderCollapseState.get(treeFolderKey(ancestor)) === 'collapsed') return true;
                 ancestor = ancestor.parentElement?.closest(SEL.treeFolder);
             }
             return false;
@@ -1082,7 +1109,7 @@ if (!DEBUG_LOGGING_ENABLED) {
             // recorded before. That cache-miss made an already-'analyzed'
             // folder look brand new and re-triggered its collapse click right
             // as the user tried to open it.
-            const key = folder.id;
+            const key = treeFolderKey(folder);
             if (!key) continue;
 
             if (folderCollapseState.has(key)) continue;
@@ -1187,7 +1214,9 @@ if (!DEBUG_LOGGING_ENABLED) {
     function insertToggleButton() {
         const submitButton = document.querySelector(SEL.toolbarSubmitButton);
         if (!submitButton) {
-            if (document.querySelector(SEL.commitFilesChanged)) insertCommitToggleButton();
+            const legacyReviewTools = document.querySelector(SEL.legacyReviewTools);
+            if (legacyReviewTools) insertLegacyPrToggleButton(legacyReviewTools);
+            else if (document.querySelector(SEL.commitFilesChanged)) insertCommitToggleButton();
             else insertLegacyToggleButton();
             return;
         }
@@ -1202,6 +1231,26 @@ if (!DEBUG_LOGGING_ENABLED) {
         button.addEventListener('click', toggleJunk);
 
         container.insertBefore(button, submitButton);
+        toggleButtonEl = button;
+        updateToggleButtonLabel();
+    }
+
+    function insertLegacyPrToggleButton(reviewsContainer) {
+        const container = reviewsContainer.parentElement;
+        if (!container || container.hasAttribute(HANDLED_ATTR)) return;
+        container.setAttribute(HANDLED_ATTR, '1');
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Hide junk';
+        button.className = 'btn btn-sm';
+        button.addEventListener('click', toggleJunk);
+
+        // Wrapped like the row's other controls so it gets the same spacing.
+        const item = document.createElement('div');
+        item.className = 'diffbar-item mr-2';
+        item.append(button);
+        container.insertBefore(item, reviewsContainer);
         toggleButtonEl = button;
         updateToggleButtonLabel();
     }
@@ -1326,8 +1375,11 @@ if (!DEBUG_LOGGING_ENABLED) {
         }
     }
 
+    // Compare pages are always legacy. GitHub also serves some PR /files pages
+    // with the legacy diff, which only shows up in the DOM, not the URL.
     function isLegacyDiffPage() {
-        return /\/compare\/.+?\.{2,3}.+/.test(window.location.pathname);
+        return /\/compare\/.+?\.{2,3}.+/.test(window.location.pathname)
+            || document.querySelector(SEL.legacyFileEntry) !== null;
     }
 
     function isDiffPage() {
