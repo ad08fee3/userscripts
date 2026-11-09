@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.7
+// @version      1.8
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -106,7 +106,8 @@
         header.addEventListener('click', (e) => {
             // Don't trigger if clicking on interactive elements
             const target = e.target;
-            if (target.closest('button') || target.closest('a') || target.closest('input')) {
+            // (A label forwards its own click to its input, e.g. the legacy "Viewed" toggle.)
+            if (target.closest('button') || target.closest('a') || target.closest('input') || target.closest('label')) {
                 return;
             }
 

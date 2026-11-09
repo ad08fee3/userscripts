@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapseJunk
-// @version      1.18
+// @version      1.19
 // @description  Auto-collapses low-value "junk" files (tests, lock files, binaries, generated code, etc) on GitHub PR, commit, and compare diff pages, with a toggle button to show/hide them.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapseJunk/githubCollapseJunk.user.js
@@ -43,6 +43,14 @@ if (!DEBUG_LOGGING_ENABLED) {
         // just left of it, in the same review-tools row.
         legacyReviewTools: '.pr-review-tools > .js-reviews-container',
         legacyViewedCheckbox: 'input.js-reviewed-checkbox',
+        // The label/form wrapping the legacy "Viewed" checkbox. Clicks inside it
+        // are not collapse clicks, even though they land inside the header.
+        legacyViewedToggle: '.js-toggle-user-reviewed-file-form',
+        // A legacy header's screen-reader line summary, e.g.
+        // "5 changes: 3 additions & 2 deletions".
+        legacyFileLineStats: '.file-info > .sr-only',
+        // The legacy PR /files page's own +N/−N diffstat in the tab bar.
+        legacyHeaderStats: '#diffstat',
         collapseButtonChevron: 'button[aria-labelledby] svg.octicon-chevron-down, button[aria-labelledby] svg.octicon-chevron-right',
         toolbarSubmitButton: '[class*="ReviewMenuButton__"]',
         // Commit pages have no review button; the toggle goes beside the
@@ -360,15 +368,20 @@ if (!DEBUG_LOGGING_ENABLED) {
 
     // A compare page (/compare/<base>..<head>) is the legacy server-rendered
     // diff: it embeds no route JSON, so the file list comes from each entry's
-    // own attributes. That gives only path and deleted status; the rest of the
-    // metadata the JSON routes carry (binary, generated, line counts) is left
-    // undefined, and the Tier 2 body-text classifiers cover the placeholders.
+    // own attributes. That gives path, deleted status, and line counts (from the
+    // header's screen-reader summary); the rest of the metadata the JSON routes
+    // carry (binary, generated) is left undefined, and the Tier 2 body-text
+    // classifiers cover the placeholders.
     // The head ref after the `..`/`...` is what Tier 3 fetches blobs from.
     function addLegacyEntries(root, summaries) {
         for (const entry of root.querySelectorAll(SEL.legacyFileEntry)) {
             const path = entry.dataset.tagsearchPath;
             if (!path) continue;
+            const lineStats = entry.querySelector(SEL.legacyFileLineStats)?.textContent
+                .match(/(\d+) additions? & (\d+) deletions?/);
             summaries.push({
+                linesAdded: lineStats ? Number(lineStats[1]) : undefined,
+                linesDeleted: lineStats ? Number(lineStats[2]) : undefined,
                 path,
                 pathDigest: entry.id.slice('diff-'.length),
                 changeType: entry.dataset.fileDeleted === 'true' ? 'REMOVED' : undefined,
@@ -474,6 +487,8 @@ if (!DEBUG_LOGGING_ENABLED) {
     function getHeaderStatsWrapper() {
         const prWrapper = document.querySelector(SEL.prHeaderWrapper);
         if (prWrapper) return prWrapper;
+        const legacyStats = document.querySelector(SEL.legacyHeaderStats);
+        if (legacyStats) return legacyStats;
         const commitRow = document.querySelector(SEL.commitFilesChanged);
         if (!commitRow) return null;
         // One level deeper too, since insertCommitToggleButton moves the diffstat
@@ -489,8 +504,8 @@ if (!DEBUG_LOGGING_ENABLED) {
         const leaves = [...wrapper.querySelectorAll('*')].filter(el => el.children.length === 0);
         return {
             wrapper,
-            additionsEl: wrapper.querySelector('.fgColor-success') ?? leaves.find(el => /^\+\d/.test(el.textContent.trim())) ?? null,
-            deletionsEl: wrapper.querySelector('.fgColor-danger') ?? leaves.find(el => /^-\d/.test(el.textContent.trim())) ?? null,
+            additionsEl: wrapper.querySelector('.fgColor-success, .color-fg-success') ?? leaves.find(el => /^\+\d/.test(el.textContent.trim())) ?? null,
+            deletionsEl: wrapper.querySelector('.fgColor-danger, .color-fg-danger') ?? leaves.find(el => /^-\d/.test(el.textContent.trim())) ?? null,
             srOnlyEl: wrapper.querySelector('.sr-only'),
         };
     }
@@ -1505,6 +1520,21 @@ if (!DEBUG_LOGGING_ENABLED) {
         const pathDigest = pathDigestFromHeader(header);
         const file = pathDigest && files.get(pathDigest);
         if (!file || selfClicking.has(pathDigest)) return;
+
+        // Toggling "Viewed" makes GitHub (and other extensions) synthesize a
+        // burst of clicks on the collapse button: marking viewed collapses the
+        // file, un-marking expands it. Guard the file through that burst, so
+        // the intermediate clicks aren't each read as a manual toggle, then
+        // adopt wherever GitHub left it.
+        if (e.target.closest(SEL.legacyViewedToggle)) {
+            selfClicking.set(pathDigest, setTimeout(() => {
+                selfClicking.delete(pathDigest);
+                const currentHeader = getHeader(getDiffEntry(pathDigest));
+                if (currentHeader) file.shouldBeCollapsed = isCollapsed(currentHeader);
+                reconcile();
+            }, SELF_CLICK_GUARD_MS));
+            return;
+        }
 
         // Alt-click is another extension's collapse-all/expand-all gesture: it
         // drives every file to one uniform state, keyed off the clicked file's
