@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         githubCollapsibleHeaderBars
-// @version      1.8
+// @version      1.9
 // @description  Makes GitHub header bars fully clickable to collapse content (PR file headers, comment threads, etc). Detects Refined Github dynamically to avoid double-handling.
 // @match        https://github.com/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/githubCollapsibleHeaderBars/githubCollapsibleHeaderBars.user.js
@@ -105,11 +105,16 @@
         // Click handler for the entire header
         header.addEventListener('click', (e) => {
             // Don't trigger if clicking on interactive elements
-            const target = e.target;
             // (A label forwards its own click to its input, e.g. the legacy "Viewed" toggle.)
-            if (target.closest('button') || target.closest('a') || target.closest('input') || target.closest('label')) {
-                return;
-            }
+            // Uses composedPath() rather than e.target.closest(): buttons like "Copy file
+            // name" and the "..." menu re-render their icon on click, detaching e.target
+            // from the button before the event bubbles here, so closest() finds nothing.
+            // The composed path is fixed at dispatch time and still includes the button.
+            const path = e.composedPath();
+            const interactive = path.slice(0, path.indexOf(header)).some(
+                el => el instanceof Element && el.matches('button, a, input, label, summary, details, [role="button"], [role="menuitem"]')
+            );
+            if (interactive) return;
 
             // Re-resolved per click, since React can replace the button element.
             const currentButton = getButton(header) ?? button;
