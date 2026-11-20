@@ -23,6 +23,7 @@ Eventually this will include scripts I pull in from other places that I want to 
 | [oktaBackgroundLogin](userscripts/oktaBackgroundLogin/README.md) | Allows Okta login to proceed in background tabs, instead of waiting for the tab to focus. |
 | [slackLinksNewTab](userscripts/slackLinksNewTab/README.md) | Makes links to Slack conversations always open in a new tab. |
 | [redditCollapseAutomod](userscripts/redditCollapseAutomod/README.md) | Collapses the annoying pinned comment that seems to be at the top of every thread nowadays. |
+| [redditFixLoginFields](userscripts/redditFixLoginFields/README.md) | Fixes old.reddit.com's login page, which doesn't autofill usernames on Firefox. |
 
 ## Auto-Closers
 
