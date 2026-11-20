@@ -109,6 +109,9 @@
                     autocomplete="current-password"
                 >
             </label>
+            <button type="button" class="reddit-bridge-login">
+                Log in
+            </button>
         `;
 
         const style = document.createElement('style');
@@ -117,7 +120,9 @@
             #${BRIDGE_ID} {
                 position: fixed !important;
                 top: 12px !important;
-                right: 12px !important;
+                left: 50% !important;
+                right: auto !important;
+                transform: translateX(-50%) !important;
                 z-index: 2147483647 !important;
                 width: 270px !important;
                 box-sizing: border-box !important;
@@ -160,6 +165,23 @@
             #${BRIDGE_ID} input:focus {
                 outline: 2px solid #2563eb !important;
                 outline-offset: 1px !important;
+            }
+
+            #reddit-autofill-bridge .reddit-bridge-login {
+                display: block !important;
+                width: 100% !important;
+                margin-top: 12px !important;
+                padding: 9px !important;
+                border: 0 !important;
+                border-radius: 4px !important;
+                background: #d97706 !important;
+                color: white !important;
+                font: bold 14px sans-serif !important;
+                cursor: pointer !important;
+            }
+
+            #reddit-autofill-bridge .reddit-bridge-login:hover {
+                background: #b45309 !important;
             }
         `;
 
@@ -274,6 +296,55 @@
 
         bindPair(bridgeUsername, realUsername);
         bindPair(bridgePassword, realPassword);
+        const loginButton =
+            bridge.querySelector('.reddit-bridge-login');
+
+        if (!loginButton.dataset.bound) {
+            loginButton.dataset.bound = 'true';
+
+            loginButton.addEventListener('click', () => {
+                // Find Reddit's actual login button, not the mirror.
+                const realLoginButton = findAllDeep(
+                    login,
+                    'button.login'
+                ).find(button =>
+                    button.textContent.trim() === 'Log In' &&
+                    !button.classList.contains('login-with-oidc')
+                );
+
+                if (!realLoginButton) {
+                    console.error(
+                        '[Reddit Autofill] Actual Reddit Log In button not found'
+                    );
+                    return;
+                }
+
+                // Make sure the latest mirror values are synchronized.
+                syncValue(
+                    bridgeUsername,
+                    realUsername
+                );
+
+                syncValue(
+                    bridgePassword,
+                    realPassword
+                );
+
+                realLoginButton.click();
+            });
+        }
+        [bridgeUsername, bridgePassword].forEach(input => {
+            if (!input.dataset.enterBound) {
+                input.dataset.enterBound = 'true';
+
+                input.addEventListener('keydown', event => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        loginButton.click();
+                    }
+                });
+            }
+        });
     }
 
     // Reddit renders its login UI asynchronously.
