@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         claudeBudgetPacer
-// @version      1.6
+// @version      1.7
 // @description  Shows spending progress relative to monthly budget and days remaining on Claude API usage page
 // @match        https://claude.ai/*
 // @downloadURL  https://github.com/ad08fee3/userscripts/raw/refs/heads/main/userscripts/claudeBudgetPacer/claudeBudgetPacer.user.js
@@ -297,34 +297,20 @@
 
     // Find and inject progress bars into the usage limits section
     function injectProgressBars() {
-        // Find the section containing "Your usage limits"
-        const headings = Array.from(document.querySelectorAll('h3'));
-        const usageLimitHeading = headings.find(h => h.textContent.includes('Your usage limits'));
-        if (!usageLimitHeading) {
-            return bail('no h3 containing "Your usage limits"', {
+        // Find the section that holds the monthly limit, by its contents rather
+        // than by a heading, since the app has removed headings here before.
+        const sections = Array.from(document.querySelectorAll('section'));
+        const section = sections.find(s =>
+            /\$[0-9,.]+\s+of\s+\$[0-9,.]+\s+spent/.test(s.textContent) &&
+            s.querySelector('[data-cds="Meter"]')
+        );
+        if (!section) {
+            return bail('no <section> containing "$X of $Y spent" and a Meter', {
                 path: location.pathname,
-                h3Count: headings.length,
-                h3Texts: headings.map(h => h.textContent.trim().slice(0, 60)),
+                sectionCount: sections.length,
                 headingTexts: Array.from(document.querySelectorAll('h1,h2,h3,h4'))
                     .map(h => h.tagName + ': ' + h.textContent.trim().slice(0, 60)),
-                pageMentionsUsageLimits: document.body.textContent.includes('Your usage limits')
-            });
-        }
-
-        // Walk up to the enclosing section
-        let section = usageLimitHeading.closest('section');
-        if (!section) {
-            return bail('heading has no ancestor <section>', {
-                heading: describe(usageLimitHeading),
-                ancestors: (function() {
-                    const chain = [];
-                    let el = usageLimitHeading.parentElement;
-                    while (el && chain.length < 6) {
-                        chain.push(el.tagName + '.' + (typeof el.className === 'string' ? el.className : ''));
-                        el = el.parentElement;
-                    }
-                    return chain;
-                })()
+                pageMentionsSpent: document.body.textContent.includes('spent')
             });
         }
 
@@ -366,9 +352,9 @@
         }
 
         // Find the reset text and left container
-        const leftContainer = spendAmountDiv.closest('[class*="md:w-80"]');
+        const leftContainer = spendAmountDiv.closest('[class*="w-80"]');
         if (!leftContainer) {
-            return bail('spend amount has no [class*="md:w-80"] ancestor', {
+            return bail('spend amount has no [class*="w-80"] ancestor', {
                 spendAmountDiv: describe(spendAmountDiv),
                 ancestorClasses: (function() {
                     const chain = [];
@@ -471,9 +457,9 @@
         monthProgressRow.setAttribute('data-usage-month-progress', 'month-bar');
 
         // Update the left side of the month progress row
-        const monthLeftContent = monthProgressRow.querySelector('[class*="md:w-80"]');
+        const monthLeftContent = monthProgressRow.querySelector('[class*="w-80"]');
         if (!monthLeftContent) {
-            bail('cloned row has no [class*="md:w-80"] left content; labels will be wrong');
+            bail('cloned row has no [class*="w-80"] left content; labels will be wrong');
         }
         if (monthLeftContent) {
             const titleDiv = monthLeftContent.querySelector('[class*="text-body"]');
